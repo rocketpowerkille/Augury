@@ -43,7 +43,16 @@ export interface SharePost {
   parts: [{ index: PartIndex; value: Hex }, { index: PartIndex; value: Hex }];
 }
 
-export type InboxPost = RoundOpen | SealedReportPost | SharePost;
+/** A member's seed parts, sealed by the dealer to that member's QoreSeal key. */
+export interface DeliveryPost {
+  kind: "delivery";
+  feedId: Hex;
+  round: bigint;
+  member: MemberIndex;
+  envelope: Hex;
+}
+
+export type InboxPost = RoundOpen | SealedReportPost | SharePost | DeliveryPost;
 
 /** One inbox entry as read from the chain. */
 export interface InboxEntry {
@@ -90,6 +99,14 @@ export function decodePost(data: Uint8Array): InboxPost | undefined {
           kind: "report",
           feedId: hex32(raw.feedId),
           round: uint(raw.round),
+          envelope: hex(raw.envelope),
+        };
+      case "delivery":
+        return {
+          kind: "delivery",
+          feedId: hex32(raw.feedId),
+          round: uint(raw.round),
+          member: member(raw.member),
           envelope: hex(raw.envelope),
         };
       case "share": {

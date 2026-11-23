@@ -33,6 +33,11 @@ describe("inbox posts", () => {
     assert.deepEqual(decodePost(encodePost(post)), post);
   });
 
+  it("round-trip a sealed share delivery", () => {
+    const post = { kind: "delivery", feedId: FEEDS["QOR/USD"], round: 3n, member: 2, envelope: "0xabcdef" } as const;
+    assert.deepEqual(decodePost(encodePost(post)), post);
+  });
+
   it("round-trip a share", () => {
     const { shares } = splitSeed(new Uint8Array(32).fill(7), 3n);
     const post = postFromShare(FEEDS["QOR/USD"], 3n, shares[2]);
