@@ -7,6 +7,7 @@ import {
   auguryRegistry,
   challengeBatchCalldata,
   feeFor,
+  gasFor,
   inboxPostMessage,
   parseAccountSequence,
   parseDeployment,
@@ -69,6 +70,19 @@ describe("native transactions", () => {
       sequence: 0n,
     });
     assert.throws(() => parseAccountSequence({}));
+  });
+
+  it("sizes gas from the encoded messages", () => {
+    const poster = evmToQor("0x2222222222222222222222222222222222222222");
+    const small = inboxPostMessage(poster, "augury-oracle", { kind: "report", feedId: FEED, round: 1n, envelope: "0x00" });
+    const large = inboxPostMessage(poster, "augury-oracle", {
+      kind: "report",
+      feedId: FEED,
+      round: 1n,
+      envelope: `0x${"ab".repeat(7000)}`,
+    });
+    assert.ok(gasFor([small]) >= 360_000n);
+    assert.ok(gasFor([large]) > gasFor([small]) + 20n * 13_000n);
   });
 
   it("rounds fees up", () => {

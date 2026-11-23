@@ -38,6 +38,17 @@ export function parseAccountSequence(body: unknown): { accountNumber: bigint; se
   return { accountNumber: BigInt(num), sequence: BigInt(seq) };
 }
 
+/**
+ * A gas limit sized from what the transaction carries: a base for execution, plus 20 gas per
+ * byte of messages and of the hybrid signature (about 8 KB with ML-DSA-87), roughly twice the
+ * usual per-byte charge. Generous on purpose; pass an exact limit to `send` when known.
+ */
+export function gasFor(messages: readonly NativeMessage[]): bigint {
+  const registry = auguryRegistry();
+  const bytes = messages.reduce((n, m) => n + registry.encodeAsAny(m).value.length, 0);
+  return 200_000n + 20n * BigInt(bytes + 8_000);
+}
+
 /** Fee in uqor for `gas` at `pricePerGas` (a decimal string), rounded up. */
 export function feeFor(gas: bigint, pricePerGas: string): bigint {
   const [whole, frac = ""] = pricePerGas.split(".");
@@ -76,7 +87,7 @@ export class NativeSender {
   }
 
   /** Sign and broadcast `messages`. Throws if the chain refuses the transaction. */
-  async send(messages: readonly NativeMessage[], gas: bigint, memo = ""): Promise<NativeTxResult> {
+  async send(messages: readonly NativeMessage[], gas = gasFor(messages), memo = ""): Promise<NativeTxResult> {
     const { accountNumber, sequence } = await this.accountSequence();
     const price = await recommendedGasPriceUqor({ rest: this.net.rest });
     const result = await this.signer.signAndBroadcast(this.transport, {
