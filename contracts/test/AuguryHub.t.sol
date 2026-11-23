@@ -49,7 +49,7 @@ contract AuguryHubTest is Test {
             _registerKey(r);
             vm.deal(r, 10 ether);
             vm.prank(r);
-            hub.stake{value: MIN_STAKE}();
+            hub.stake{value: MIN_STAKE}(r);
             reporterList.push(r);
         }
     }
@@ -174,7 +174,7 @@ contract AuguryHubTest is Test {
         vm.deal(stranger, 1 ether);
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(AuguryHub.KeyNotRegistered.selector, stranger));
-        hub.stake{value: 1 ether}();
+        hub.stake{value: 1 ether}(stranger);
     }
 
     function test_StakeRejectsWrongAlgorithm() public {
@@ -183,7 +183,28 @@ contract AuguryHubTest is Test {
         vm.deal(other, 1 ether);
         vm.prank(other);
         vm.expectRevert(abi.encodeWithSelector(AuguryHub.KeyNotRegistered.selector, other));
-        hub.stake{value: 1 ether}();
+        hub.stake{value: 1 ether}(other);
+    }
+
+    function test_AnyoneCanFundAReportersStake() public {
+        address r = reporterList[0];
+        address funder = makeAddr("funder");
+        vm.deal(funder, 1 ether);
+        vm.prank(funder);
+        hub.stake{value: 1 ether}(r);
+        (uint256 total,) = hub.reporters(r);
+        assertEq(total, MIN_STAKE + 1 ether);
+        (uint256 funderStake,) = hub.reporters(funder);
+        assertEq(funderStake, 0);
+    }
+
+    function test_RewardGoesToRewardToNotCaller() public {
+        AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
+        _post(1, rs, 1);
+        address payable payee = payable(makeAddr("payee"));
+        // The test contract cannot receive QOR, but it can still prove fraud for someone else.
+        hub.challengeBatch(FEED, 1, rs, payee);
+        assertEq(payee.balance, MIN_BOND / 2);
     }
 
     function test_ReporterExitAndWithdraw() public {
@@ -225,7 +246,7 @@ contract AuguryHubTest is Test {
             _sign(r, hub.withdrawMessage(hub.REPORTER_WITHDRAW_TAG(), r, r, 1))
         );
         vm.prank(r);
-        hub.stake{value: MIN_STAKE}();
+        hub.stake{value: MIN_STAKE}(r);
         vm.expectRevert(AuguryHub.BadSignature.selector);
         hub.requestExit(r, sig);
     }
@@ -331,7 +352,7 @@ contract AuguryHubTest is Test {
         _post(2, rs, 1); // lie: the median is 101
 
         vm.prank(challenger);
-        hub.challengeBatch(FEED, 2, rs);
+        hub.challengeBatch(FEED, 2, rs, payable(challenger));
 
         assertEq(challenger.balance, MIN_BOND / 2);
         assertEq(hub.sequencerBond(), 0);
@@ -349,7 +370,7 @@ contract AuguryHubTest is Test {
         AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
         _post(1, rs, 101);
         vm.expectRevert(AuguryHub.NoFraud.selector);
-        hub.challengeBatch(FEED, 1, rs);
+        hub.challengeBatch(FEED, 1, rs, payable(challenger));
     }
 
     function test_ChallengeWithWrongReportsReverts() public {
@@ -357,7 +378,7 @@ contract AuguryHubTest is Test {
         _post(1, rs, 1);
         rs[0].price = 1; // not the reports that were posted
         vm.expectRevert(AuguryHub.RootMismatch.selector);
-        hub.challengeBatch(FEED, 1, rs);
+        hub.challengeBatch(FEED, 1, rs, payable(challenger));
     }
 
     function test_ChallengeCatchesBadReportSignature() public {
@@ -365,7 +386,7 @@ contract AuguryHubTest is Test {
         rs[1].signature = hex"00";
         _post(1, rs, 101);
         vm.prank(challenger);
-        hub.challengeBatch(FEED, 1, rs);
+        hub.challengeBatch(FEED, 1, rs, payable(challenger));
         (,,,,, AuguryHub.Status status) = hub.batches(FEED, 1);
         assertEq(uint8(status), uint8(AuguryHub.Status.Invalid));
         assertEq(challenger.balance, MIN_BOND / 2);
@@ -376,7 +397,7 @@ contract AuguryHubTest is Test {
         rs[2] = rs[0];
         _post(1, rs, 100);
         vm.prank(challenger);
-        hub.challengeBatch(FEED, 1, rs);
+        hub.challengeBatch(FEED, 1, rs, payable(challenger));
         (,,,,, AuguryHub.Status status) = hub.batches(FEED, 1);
         assertEq(uint8(status), uint8(AuguryHub.Status.Invalid));
         assertEq(challenger.balance, MIN_BOND / 2);
@@ -389,7 +410,7 @@ contract AuguryHubTest is Test {
         AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
         _post(1, rs, 101);
         vm.prank(challenger);
-        hub.challengeBatch(FEED, 1, rs);
+        hub.challengeBatch(FEED, 1, rs, payable(challenger));
         (,,,,, AuguryHub.Status status) = hub.batches(FEED, 1);
         assertEq(uint8(status), uint8(AuguryHub.Status.Invalid));
         assertEq(challenger.balance, MIN_BOND / 2);
@@ -402,7 +423,7 @@ contract AuguryHubTest is Test {
         address r = reporterList[0];
         hub.requestExit(r, _sign(r, hub.exitMessage(hub.REPORTER_EXIT_TAG(), r, 0)));
         vm.expectRevert(AuguryHub.NoFraud.selector);
-        hub.challengeBatch(FEED, 1, rs);
+        hub.challengeBatch(FEED, 1, rs, payable(challenger));
     }
 
     function test_ChallengeAfterWindowReverts() public {
@@ -410,14 +431,14 @@ contract AuguryHubTest is Test {
         _post(1, rs, 1);
         vm.warp(block.timestamp + WINDOW);
         vm.expectRevert(AuguryHub.BatchNotChallengeable.selector);
-        hub.challengeBatch(FEED, 1, rs);
+        hub.challengeBatch(FEED, 1, rs, payable(challenger));
     }
 
     function test_EquivocationSlashesReporter() public {
         AuguryHub.SignedReport memory a = _report(1, 0, 100);
         AuguryHub.SignedReport memory b = _report(1, 0, 200);
         vm.prank(challenger);
-        hub.reportEquivocation(FEED, 1, a, b);
+        hub.reportEquivocation(FEED, 1, a, b, payable(challenger));
         (uint256 left,) = hub.reporters(reporterList[0]);
         assertEq(left, 0);
         assertEq(challenger.balance, MIN_STAKE / 2);
@@ -426,7 +447,7 @@ contract AuguryHubTest is Test {
     function test_SameReportTwiceIsNotEquivocation() public {
         AuguryHub.SignedReport memory a = _report(1, 0, 100);
         vm.expectRevert(AuguryHub.NotEquivocation.selector);
-        hub.reportEquivocation(FEED, 1, a, a);
+        hub.reportEquivocation(FEED, 1, a, a, payable(challenger));
     }
 
     function test_EquivocationNeedsValidSignatures() public {
@@ -434,7 +455,7 @@ contract AuguryHubTest is Test {
         AuguryHub.SignedReport memory b = _report(1, 0, 200);
         b.signature = hex"01";
         vm.expectRevert(AuguryHub.BadSignature.selector);
-        hub.reportEquivocation(FEED, 1, a, b);
+        hub.reportEquivocation(FEED, 1, a, b, payable(challenger));
     }
 
     // ---------------------------------------------------------------------------------------

@@ -13,10 +13,11 @@ import {QorePQC} from "./libraries/QorePQC.sol";
 /// batch's signed reports: the hub rebuilds the report root, re-checks every report and
 /// recomputes the median. A proven fraud slashes the sequencer's bond.
 ///
-/// Nothing that moves trust is authorized by `msg.sender`. Batches, exits and withdrawals are
-/// authorized by ML-DSA-87 signatures checked with the pqcVerify precompile, against keys
-/// read from the chain with pqcKeyStatus. Depositing stake or bond is the only payable entry
-/// point that uses `msg.sender`, and it only adds funds.
+/// No logic reads `msg.sender`. Batches, exits and withdrawals are authorized by ML-DSA-87
+/// signatures checked with the pqcVerify precompile, against keys read from the chain with
+/// pqcKeyStatus. Deposits name the reporter they credit, and challengers name where their
+/// reward goes, so the hub works the same whether it is called by a plain EVM transaction
+/// or through QoreChain's hybrid-signed cross-VM call.
 contract AuguryHub is IAugury {
     // ---------------------------------------------------------------------------------------
     // Types
@@ -111,10 +112,10 @@ contract AuguryHub is IAugury {
         uint32 reportCount
     );
     event BatchInvalidated(
-        bytes32 indexed feedId, uint64 indexed round, FraudKind kind, address challenger
+        bytes32 indexed feedId, uint64 indexed round, FraudKind kind, address rewardTo
     );
-    event SequencerSlashed(uint256 amount, address challenger, uint256 reward);
-    event ReporterSlashed(address indexed reporter, uint256 amount, address challenger);
+    event SequencerSlashed(uint256 amount, address rewardTo, uint256 reward);
+    event ReporterSlashed(address indexed reporter, uint256 amount, address rewardTo);
 
     enum FraudKind {
         WrongMedian,
@@ -233,14 +234,15 @@ contract AuguryHub is IAugury {
     // Reporter stake
     // ---------------------------------------------------------------------------------------
 
-    /// @notice Add stake for `msg.sender`, which must have an ML-DSA-87 key registered.
-    function stake() external payable {
+    /// @notice Add stake for `reporter`, which must have an ML-DSA-87 key registered. Anyone
+    /// may fund any reporter; only the reporter's key can take the stake out.
+    function stake(address reporter) external payable {
         if (msg.value == 0) revert ZeroAmount();
-        _requireKey(msg.sender);
-        Staker storage s = reporters[msg.sender];
+        _requireKey(reporter);
+        Staker storage s = reporters[reporter];
         if (s.exitRequestedAt != 0) revert ExitPending();
         s.stake += msg.value;
-        emit Staked(msg.sender, msg.value, s.stake);
+        emit Staked(reporter, msg.value, s.stake);
     }
 
     /// @notice Start leaving. The reporter stops counting as active for batches posted after now.
@@ -355,10 +357,14 @@ contract AuguryHub is IAugury {
 
     /// @notice One-step fraud proof. `reports` must be exactly the batch's reports, in order.
     /// The batch is invalidated and the sequencer slashed if any report is invalid or the
-    /// median differs from the posted price. Reverts with `NoFraud` otherwise.
-    function challengeBatch(bytes32 feedId, uint64 round, SignedReport[] calldata reports)
-        external
-    {
+    /// median differs from the posted price. Reverts with `NoFraud` otherwise. Half of the
+    /// slashed bond is paid to `rewardTo`.
+    function challengeBatch(
+        bytes32 feedId,
+        uint64 round,
+        SignedReport[] calldata reports,
+        address payable rewardTo
+    ) external {
         Batch storage b = batches[feedId][round];
         if (b.status != Status.Posted || block.timestamp >= uint256(b.postedAt) + challengeWindow)
         {
@@ -371,16 +377,18 @@ contract AuguryHub is IAugury {
         if (!fraud) revert NoFraud();
 
         b.status = Status.Invalid;
-        emit BatchInvalidated(feedId, round, kind, msg.sender);
-        _slashSequencer(payable(msg.sender));
+        emit BatchInvalidated(feedId, round, kind, rewardTo);
+        _slashSequencer(rewardTo);
     }
 
-    /// @notice Slash a reporter that signed two different reports for the same round.
+    /// @notice Slash a reporter that signed two different reports for the same round. Half of
+    /// the stake is paid to `rewardTo`.
     function reportEquivocation(
         bytes32 feedId,
         uint64 round,
         SignedReport calldata a,
-        SignedReport calldata b
+        SignedReport calldata b,
+        address payable rewardTo
     ) external {
         if (a.reporter != b.reporter) revert NotEquivocation();
         if (a.price == b.price && a.observedAt == b.observedAt) revert NotEquivocation();
@@ -400,8 +408,8 @@ contract AuguryHub is IAugury {
         s.stake = 0;
         uint256 reward = amount / 2;
         slashedTotal += amount - reward;
-        emit ReporterSlashed(reporter, amount, msg.sender);
-        _send(payable(msg.sender), reward);
+        emit ReporterSlashed(reporter, amount, rewardTo);
+        _send(rewardTo, reward);
     }
 
     // ---------------------------------------------------------------------------------------
@@ -505,13 +513,13 @@ contract AuguryHub is IAugury {
         revert NoPrice();
     }
 
-    function _slashSequencer(address payable challenger) internal {
+    function _slashSequencer(address payable rewardTo) internal {
         uint256 amount = sequencerBond;
         sequencerBond = 0;
         uint256 reward = amount / 2;
         slashedTotal += amount - reward;
-        emit SequencerSlashed(amount, challenger, reward);
-        _send(challenger, reward);
+        emit SequencerSlashed(amount, rewardTo, reward);
+        _send(rewardTo, reward);
     }
 
     /// @dev Verify `signature` by `account` over `message`, then advance the account's nonce.
