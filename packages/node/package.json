@@ -19,7 +19,9 @@
     "@augury/sequencer": "workspace:*",
     "@augury/shared": "workspace:*",
     "@augury/watchtower": "workspace:*",
+    "@qorechain/evm": "0.14.0",
     "@qorechain/qoreseal": "0.1.0",
+    "@qorechain/rdk": "0.9.0",
     "@qorechain/sdk": "0.14.0"
   }
 }
