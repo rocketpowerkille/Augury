@@ -201,7 +201,9 @@ interface IAugury {
 
 contract Example {
     IAugury public immutable augury;
-    bytes32 public constant FBTC_USD = keccak256("fBTC/USD");
+    // Feed id = sha256("augury-feed:fBTC/USD"), see packages/shared/src/feeds.ts
+    bytes32 public constant FBTC_USD =
+        0x4bb79407dfad9e433ad54bfd5353fe075f319ef31887ca79b4b5b54a584bb1ad;
 
     constructor(IAugury _augury) { augury = _augury; }
 
