@@ -66,7 +66,7 @@ sequenceDiagram
     C->>I: Dealer opens round N: round public key + share commitments
     C->>C: Dealer seals each member's share to that member
     R->>R: Fetch price, sign with ML-DSA-87
-    R->>I: Post sealed report (ciphertext only)
+    R->>I: Post sealed report + its signature (one tx)
     Note over I: Round closes at a fixed block height
     C->>I: Release round key shares
     S->>S: Rebuild key, decrypt, verify signatures, take median
@@ -81,7 +81,7 @@ sequenceDiagram
 ```
 
 1. **Open.** The round's dealer, a committee member that rotates every round, creates a fresh seed and publishes the round's ML-KEM-1024 public key with SHA-256 commitments to three seed parts. Each other member receives its two parts sealed with QoreSeal to its own key.
-2. **Report.** Each reporter fetches the price from its own sources, signs `(feed, round, price, timestamp)` with its registered ML-DSA-87 key, seals the signed report to the round key and posts it to the rollup inbox. The order of the inbox is fixed by QoreChain.
+2. **Report.** Each reporter fetches the price from its own sources, picks a fresh 32-byte salt and signs `(feed, round, price, timestamp, salt)` with its registered ML-DSA-87 key. In one transaction it posts two entries to the rollup inbox: the signed message sealed to the round key, then the signature. QoreChain caps a rollup post at 6,144 bytes and an ML-DSA-87 signature is 4,627, so the signature travels in the clear; the salt stays sealed, so nobody can test guessed prices against it. The order of the inbox is fixed by QoreChain.
 3. **Close.** At a fixed block height the round closes. Reports posted later are ignored.
 4. **Release.** Two of the three committee members publish their shares, and anyone can rebuild the round's secret key.
 5. **Aggregate.** The sequencer decrypts every report, drops invalid ones (bad signature, unregistered key, wrong round, duplicate), takes the median and posts a batch signed with ML-DSA-87.
