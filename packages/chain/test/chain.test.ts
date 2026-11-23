@@ -1,0 +1,185 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { encodePost, FEEDS, type SignedReport } from "@augury/shared";
+import { qorechainRegistry, evmToQor } from "@qorechain/sdk";
+import { openEvmWindowMessage } from "@qorechain/evm";
+import {
+  auguryRegistry,
+  challengeBatchCalldata,
+  feeFor,
+  inboxPostMessage,
+  parseAccountSequence,
+  parseDeployment,
+  postBatchCalldata,
+  stakeCalldata,
+  testnet,
+  toInboxEntries,
+} from "../src/index.ts";
+
+const FEED = FEEDS["fBTC/USD"];
+const report: SignedReport = {
+  feedId: FEED,
+  round: 42n,
+  reporter: "0x2222222222222222222222222222222222222222",
+  price: 9712345000000n,
+  observedAt: 1764000000n,
+  signature: Uint8Array.of(0xab, 0xcd),
+};
+
+describe("network and deployment", () => {
+  it("uses the official testnet preset", () => {
+    const net = testnet();
+    assert.equal(net.chainId, "qorechain-diana");
+    assert.equal(net.evmChainId, 9800n);
+    assert.match(net.evmRpc, /^https:\/\//);
+  });
+
+  const valid = {
+    network: "testnet",
+    hub: "0x1111111111111111111111111111111111111111",
+    rollupId: "augury-oracle",
+    committee: ["0x00000000000000000000000000000000000000c0", "0x00000000000000000000000000000000000000c1", "0x00000000000000000000000000000000000000c2"],
+    sequencer: "0x00000000000000000000000000000000000000AA",
+    minReports: 3,
+    maxReports: 16,
+  };
+
+  it("parses a deployment and lowercases addresses", () => {
+    const d = parseDeployment(valid);
+    assert.equal(d.sequencer, "0x00000000000000000000000000000000000000aa");
+    assert.equal(d.committee.length, 3);
+  });
+
+  it("rejects a malformed deployment", () => {
+    assert.throws(() => parseDeployment({ ...valid, hub: "0x12" }), /hub/);
+    assert.throws(() => parseDeployment({ ...valid, committee: valid.committee.slice(0, 2) }), /committee/);
+    assert.throws(() => parseDeployment({ ...valid, maxReports: 2 }), /maxReports/);
+  });
+});
+
+describe("native transactions", () => {
+  it("reads account number and sequence, plain or nested", () => {
+    assert.deepEqual(parseAccountSequence({ account: { account_number: "7", sequence: "3" } }), {
+      accountNumber: 7n,
+      sequence: 3n,
+    });
+    assert.deepEqual(parseAccountSequence({ account: { base_account: { account_number: "9", sequence: "0" } } }), {
+      accountNumber: 9n,
+      sequence: 0n,
+    });
+    assert.throws(() => parseAccountSequence({}));
+  });
+
+  it("rounds fees up", () => {
+    assert.equal(feeFor(200_000n, "0.025"), 5_000n);
+    assert.equal(feeFor(3n, "0.5"), 2n);
+    assert.equal(feeFor(10n, "2"), 20n);
+  });
+});
+
+describe("rollup inbox", () => {
+  const open = { kind: "report", feedId: FEED, round: 1n, envelope: "0xdeadbeef" } as const;
+  const poster = evmToQor("0x2222222222222222222222222222222222222222");
+
+  it("turns raw entries into Augury entries, skipping deposits and foreign payloads", () => {
+    const entries = toInboxEntries(
+      [
+        { height: 10n, poster, payload: encodePost(open) },
+        { height: 11n, poster: "deposit:qor1xyz", payload: new Uint8Array(8) },
+        { height: 12, poster, payload: new TextEncoder().encode("not augury") },
+        { height: 13n, poster, payload: encodePost(open) },
+      ],
+      100n,
+    );
+    assert.deepEqual(
+      entries.map((e) => [e.seq, e.height, e.poster]),
+      [
+        [101n, 10n, "0x2222222222222222222222222222222222222222"],
+        [104n, 13n, "0x2222222222222222222222222222222222222222"],
+      ],
+    );
+    assert.deepEqual(entries[0]!.post, open);
+  });
+
+  it("the SDK's default registry cannot encode inbox posts (why auguryRegistry exists)", () => {
+    const msg = inboxPostMessage(poster, "augury-oracle", open);
+    assert.throws(() => qorechainRegistry().encodeAsAny(msg), /Unregistered type url/);
+  });
+
+  it("builds a post message the Augury registry can encode", () => {
+    const msg = inboxPostMessage(poster, "augury-oracle", open);
+    const registry = auguryRegistry();
+    const any = registry.encodeAsAny(msg);
+    assert.equal(any.typeUrl, "/qorechain.rdk.v1.MsgPostRollupData");
+    const decoded = registry.decode(any) as { poster: string; rollupId: string; data: Uint8Array };
+    assert.equal(decoded.poster, poster);
+    assert.equal(decoded.rollupId, "augury-oracle");
+    assert.deepEqual(decoded.data, encodePost(open));
+  });
+
+  it("the Augury registry still encodes the SDK's EVM window message", () => {
+    const msg = openEvmWindowMessage({
+      sender: poster,
+      blocks: 600n,
+      maxTxs: 10n,
+      maxValue: "1000000",
+      allowedTargets: ["0x1111111111111111111111111111111111111111"],
+    });
+    const registry = auguryRegistry();
+    const decoded = registry.decode(registry.encodeAsAny(msg)) as { allowedTargets: string[]; maxTxs: unknown };
+    assert.deepEqual(decoded.allowedTargets, ["0x1111111111111111111111111111111111111111"]);
+  });
+});
+
+describe("AuguryHub calldata matches cast", () => {
+  it("postBatch", () => {
+    const data = postBatchCalldata({
+      header: { feedId: FEED, round: 42n, price: 9712345000000n },
+      reports: [report],
+      signature: Uint8Array.of(1, 2),
+    });
+    assert.equal(
+      data,
+      "0x7427c066" +
+        "4bb79407dfad9e433ad54bfd5353fe075f319ef31887ca79b4b5b54a584bb1ad" +
+        "000000000000000000000000000000000000000000000000000000000000002a" +
+        "000000000000000000000000000000000000000000000000000008d554dfa840" +
+        "00000000000000000000000000000000000000000000000000000000000000a0" +
+        "00000000000000000000000000000000000000000000000000000000000001a0" +
+        "0000000000000000000000000000000000000000000000000000000000000001" +
+        "0000000000000000000000000000000000000000000000000000000000000020" +
+        "0000000000000000000000002222222222222222222222222222222222222222" +
+        "000000000000000000000000000000000000000000000000000008d554dfa840" +
+        "0000000000000000000000000000000000000000000000000000000069248100" +
+        "0000000000000000000000000000000000000000000000000000000000000080" +
+        "0000000000000000000000000000000000000000000000000000000000000002" +
+        "abcd000000000000000000000000000000000000000000000000000000000000" +
+        "0000000000000000000000000000000000000000000000000000000000000002" +
+        "0102000000000000000000000000000000000000000000000000000000000000",
+    );
+  });
+
+  it("challengeBatch with a negative price", () => {
+    const data = challengeBatchCalldata(FEED, 42n, [{ ...report, price: -5n }], "0x5555555555555555555555555555555555555555");
+    assert.equal(
+      data,
+      "0xf75a6869" +
+        "4bb79407dfad9e433ad54bfd5353fe075f319ef31887ca79b4b5b54a584bb1ad" +
+        "000000000000000000000000000000000000000000000000000000000000002a" +
+        "0000000000000000000000000000000000000000000000000000000000000080" +
+        "0000000000000000000000005555555555555555555555555555555555555555" +
+        "0000000000000000000000000000000000000000000000000000000000000001" +
+        "0000000000000000000000000000000000000000000000000000000000000020" +
+        "0000000000000000000000002222222222222222222222222222222222222222" +
+        "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb" +
+        "0000000000000000000000000000000000000000000000000000000069248100" +
+        "0000000000000000000000000000000000000000000000000000000000000080" +
+        "0000000000000000000000000000000000000000000000000000000000000002" +
+        "abcd000000000000000000000000000000000000000000000000000000000000",
+    );
+  });
+
+  it("stake", () => {
+    assert.equal(stakeCalldata("0x2222222222222222222222222222222222222222"), "0x264762040000000000000000000000002222222222222222222222222222222222222222");
+  });
+});
