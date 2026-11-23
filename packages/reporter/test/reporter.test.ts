@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   bytesToHex,
+  encodePost,
+  MAX_POST_BYTES,
   FEEDS,
   generateSigningKey,
   hexToBytes,
@@ -11,7 +13,7 @@ import {
   type Domain,
   type RoundOpen,
 } from "@augury/shared";
-import { binance, buildReportPost, coinbase, kraken, observePrice } from "../src/index.ts";
+import { binance, buildReportPosts, coinbase, kraken, observePrice } from "../src/index.ts";
 
 const domain: Domain = { chainId: 9800n, hub: "0x1111111111111111111111111111111111111111" };
 
@@ -78,7 +80,7 @@ describe("buildReportPost", () => {
       commitments: [`0x${"00".repeat(32)}`, `0x${"00".repeat(32)}`, `0x${"00".repeat(32)}`],
     };
     const reporter = "0x2222222222222222222222222222222222222222" as const;
-    const post = buildReportPost({
+    const [sealed, signature] = buildReportPosts({
       domain,
       sealChainId: "qorechain-diana",
       reporter,
@@ -92,12 +94,15 @@ describe("buildReportPost", () => {
       sealChainId: "qorechain-diana",
       domain,
       keys,
-      envelope: hexToBytes(post.envelope),
+      envelope: hexToBytes(sealed.envelope),
       feedId: open.feedId,
       round: open.round,
     });
     assert.equal(opened.price, 9712345000000n);
     assert.equal(opened.reporter, reporter);
-    assert.equal(verifyReport(key.publicKey, domain, opened), true);
+    assert.equal(verifyReport(key.publicKey, domain, { ...opened, signature: hexToBytes(signature.signature) }), true);
+    // Both posts fit the chain's per-post limit.
+    assert.ok(encodePost(sealed).length <= MAX_POST_BYTES);
+    assert.ok(encodePost(signature).length <= MAX_POST_BYTES);
   });
 });
