@@ -8,6 +8,7 @@ Checks that read the chain with `eth_call` only. They send no transaction, so th
 
 | Date | Check | Result | Rerun |
 |---|---|---|---|
+| 2026-11-23 | Chain adapters read the testnet: rollup info, inbox head, and inbox posts 12..14 of the public rollup `vigil-pay-1` read back through the RDK and verified against the chain's inbox accumulator; EVM block height; `pqcKeyStatus` through the EVM kit | All reads succeeded; the three posts were correctly skipped as non-Augury payloads | `cd packages/chain && node scripts/probe.ts` |
 | 2026-11-23 | `pqcVerify` (0x0A01) on `qorechain-diana` (EVM chain id 9800) accepts an ML-DSA-87 signature made with `@qorechain/pqc` 0.2.3, and rejects it over a changed message | valid / invalid, as expected. `eth_estimateGas` for one call: 321,430 gas including the 21,000 base and about 7.4 KB of calldata | `pnpm --filter @augury/shared check:precompile` |
 
 ## Accounts
