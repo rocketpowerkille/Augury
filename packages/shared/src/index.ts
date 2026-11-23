@@ -4,3 +4,4 @@ export * from "./messages.ts";
 export * from "./median.ts";
 export * from "./feeds.ts";
 export * from "./shares.ts";
+export * from "./crypto.ts";
