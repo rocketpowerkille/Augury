@@ -1,0 +1,23 @@
+{
+  "name": "@augury/node",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The Augury node: committee, reporter, sequencer and watchtower roles running against QoreChain",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@augury/chain": "workspace:*",
+    "@augury/committee": "workspace:*",
+    "@augury/reporter": "workspace:*",
+    "@augury/sequencer": "workspace:*",
+    "@augury/shared": "workspace:*",
+    "@augury/watchtower": "workspace:*"
+  }
+}

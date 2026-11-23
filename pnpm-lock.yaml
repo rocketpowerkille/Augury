@@ -224,6 +224,27 @@ importers:
         specifier: 0.1.0
         version: 0.1.0
 
+  packages/node:
+    dependencies:
+      '@augury/chain':
+        specifier: workspace:*
+        version: link:../chain
+      '@augury/committee':
+        specifier: workspace:*
+        version: link:../committee
+      '@augury/reporter':
+        specifier: workspace:*
+        version: link:../reporter
+      '@augury/sequencer':
+        specifier: workspace:*
+        version: link:../sequencer
+      '@augury/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@augury/watchtower':
+        specifier: workspace:*
+        version: link:../watchtower
+
   packages/reporter:
     dependencies:
       '@augury/shared':
