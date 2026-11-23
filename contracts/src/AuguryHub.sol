@@ -38,10 +38,14 @@ contract AuguryHub is IAugury {
         Status status;
     }
 
+    /// @dev `salt` is 32 random bytes chosen by the reporter. The signature is published
+    /// before the round closes while the report stays sealed; without the salt, anyone could
+    /// test candidate prices against the public signature and learn the price early.
     struct SignedReport {
         address reporter;
         int256 price;
         uint64 observedAt;
+        bytes32 salt;
         bytes signature;
     }
 
@@ -60,7 +64,7 @@ contract AuguryHub is IAugury {
     /// @notice How many rounds `getPrice` walks back past invalidated batches.
     uint256 public constant MAX_WALK_BACK = 32;
 
-    bytes32 public constant REPORT_TAG = keccak256("AUGURY_REPORT_V1");
+    bytes32 public constant REPORT_TAG = keccak256("AUGURY_REPORT_V2");
     bytes32 public constant BATCH_TAG = keccak256("AUGURY_BATCH_V1");
     bytes32 public constant REPORTER_EXIT_TAG = keccak256("AUGURY_REPORTER_EXIT_V1");
     bytes32 public constant REPORTER_WITHDRAW_TAG = keccak256("AUGURY_REPORTER_WITHDRAW_V1");
@@ -186,11 +190,29 @@ contract AuguryHub is IAugury {
         uint64 round,
         address reporter,
         int256 price,
-        uint64 observedAt
+        uint64 observedAt,
+        bytes32 salt
     ) public view returns (bytes memory) {
         return abi.encode(
-            REPORT_TAG, block.chainid, address(this), feedId, round, reporter, price, observedAt
+            REPORT_TAG,
+            block.chainid,
+            address(this),
+            feedId,
+            round,
+            reporter,
+            price,
+            observedAt,
+            salt
         );
+    }
+
+    /// @dev The signed message of report `r`.
+    function _messageOf(bytes32 feedId, uint64 round, SignedReport calldata r)
+        internal
+        view
+        returns (bytes memory)
+    {
+        return reportMessage(feedId, round, r.reporter, r.price, r.observedAt, r.salt);
     }
 
     function batchMessage(
@@ -227,7 +249,7 @@ contract AuguryHub is IAugury {
         view
         returns (bytes32)
     {
-        return sha256(reportMessage(feedId, round, r.reporter, r.price, r.observedAt));
+        return sha256(_messageOf(feedId, round, r));
     }
 
     // ---------------------------------------------------------------------------------------
@@ -381,8 +403,8 @@ contract AuguryHub is IAugury {
         _slashSequencer(rewardTo);
     }
 
-    /// @notice Slash a reporter that signed two different reports for the same round. Half of
-    /// the stake is paid to `rewardTo`.
+    /// @notice Slash a reporter that signed two different reports for the same round (an
+    /// honest reporter signs exactly one). Half of the stake is paid to `rewardTo`.
     function reportEquivocation(
         bytes32 feedId,
         uint64 round,
@@ -391,16 +413,12 @@ contract AuguryHub is IAugury {
         address payable rewardTo
     ) external {
         if (a.reporter != b.reporter) revert NotEquivocation();
-        if (a.price == b.price && a.observedAt == b.observedAt) revert NotEquivocation();
+        bytes memory messageA = _messageOf(feedId, round, a);
+        bytes memory messageB = _messageOf(feedId, round, b);
+        if (keccak256(messageA) == keccak256(messageB)) revert NotEquivocation();
         address reporter = a.reporter;
-        if (!_verifyBy(reporter, reportMessage(feedId, round, reporter, a.price, a.observedAt), a.signature))
-        {
-            revert BadSignature();
-        }
-        if (!_verifyBy(reporter, reportMessage(feedId, round, reporter, b.price, b.observedAt), b.signature))
-        {
-            revert BadSignature();
-        }
+        if (!_verifyBy(reporter, messageA, a.signature)) revert BadSignature();
+        if (!_verifyBy(reporter, messageB, b.signature)) revert BadSignature();
 
         Staker storage s = reporters[reporter];
         uint256 amount = s.stake;
@@ -487,11 +505,9 @@ contract AuguryHub is IAugury {
                 if (reports[j].reporter == r.reporter) return (true, FraudKind.DuplicateReporter);
             }
             if (!isActiveAt(r.reporter, b.postedAt)) return (true, FraudKind.InactiveReporter);
-            if (!_verifyBy(
-                    r.reporter,
-                    reportMessage(feedId, round, r.reporter, r.price, r.observedAt),
-                    r.signature
-                )) return (true, FraudKind.BadSignature);
+            if (!_verifyBy(r.reporter, _messageOf(feedId, round, r), r.signature)) {
+                return (true, FraudKind.BadSignature);
+            }
             prices[i] = r.price;
         }
         if (median(prices) != b.price) return (true, FraudKind.WrongMedian);

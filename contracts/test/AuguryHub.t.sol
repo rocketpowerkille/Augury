@@ -77,11 +77,13 @@ contract AuguryHubTest is Test {
     {
         address who = reporterList[i];
         uint64 observedAt = uint64(block.timestamp);
+        bytes32 salt = keccak256(abi.encode("salt", who, round, price));
         r = AuguryHub.SignedReport({
             reporter: who,
             price: price,
             observedAt: observedAt,
-            signature: _sign(who, hub.reportMessage(FEED, round, who, price, observedAt))
+            salt: salt,
+            signature: _sign(who, hub.reportMessage(FEED, round, who, price, observedAt, salt))
         });
     }
 
@@ -124,7 +126,7 @@ contract AuguryHubTest is Test {
     // ---------------------------------------------------------------------------------------
 
     function test_TagsMatchSharedPackage() public view {
-        assertEq(hub.REPORT_TAG(), 0xa5f89c188aa63a96e907dc1110f53cb69ec04e2cb9dc587a4ee7c41f6eb9ae5b);
+        assertEq(hub.REPORT_TAG(), 0xde27b797c84cbdc91a7c574a77ca25092b7ae1342f803884235a3775df6eafba);
         assertEq(hub.BATCH_TAG(), 0x2360d05af57c90d2666345da3fbbeaa6d5b62565e01282b906e9abf7287cd413);
         assertEq(
             hub.REPORTER_EXIT_TAG(), 0x0b419c48f0845fdbb68f3a9f58252d2d204e4588774a4262a5b6c0d87e1e4145
@@ -141,17 +143,23 @@ contract AuguryHubTest is Test {
 
     function test_ReportMessageMatchesSharedPackage() public view {
         bytes memory expected = bytes.concat(
-            hex"a5f89c188aa63a96e907dc1110f53cb69ec04e2cb9dc587a4ee7c41f6eb9ae5b",
+            hex"de27b797c84cbdc91a7c574a77ca25092b7ae1342f803884235a3775df6eafba",
             hex"0000000000000000000000000000000000000000000000000000000000002648",
             hex"0000000000000000000000001111111111111111111111111111111111111111",
             hex"4bb79407dfad9e433ad54bfd5353fe075f319ef31887ca79b4b5b54a584bb1ad",
             hex"000000000000000000000000000000000000000000000000000000000000002a",
             hex"0000000000000000000000002222222222222222222222222222222222222222",
             hex"000000000000000000000000000000000000000000000000000008d554dfa840",
-            hex"0000000000000000000000000000000000000000000000000000000069248100"
+            hex"0000000000000000000000000000000000000000000000000000000069248100",
+            hex"7777777777777777777777777777777777777777777777777777777777777777"
         );
         bytes memory actual = hub.reportMessage(
-            FEED, 42, 0x2222222222222222222222222222222222222222, 9712345000000, 1764000000
+            FEED,
+            42,
+            0x2222222222222222222222222222222222222222,
+            9712345000000,
+            1764000000,
+            0x7777777777777777777777777777777777777777777777777777777777777777
         );
         assertEq(actual, expected);
     }
@@ -442,6 +450,24 @@ contract AuguryHubTest is Test {
         (uint256 left,) = hub.reporters(reporterList[0]);
         assertEq(left, 0);
         assertEq(challenger.balance, MIN_STAKE / 2);
+    }
+
+    function test_SamePriceWithAnotherSaltIsEquivocation() public {
+        AuguryHub.SignedReport memory a = _report(1, 0, 100);
+        // A separate struct: `b = a` would alias the same memory.
+        bytes32 otherSalt = bytes32(uint256(a.salt) + 1);
+        AuguryHub.SignedReport memory b = AuguryHub.SignedReport({
+            reporter: a.reporter,
+            price: a.price,
+            observedAt: a.observedAt,
+            salt: otherSalt,
+            signature: _sign(
+                a.reporter, hub.reportMessage(FEED, 1, a.reporter, a.price, a.observedAt, otherSalt)
+            )
+        });
+        hub.reportEquivocation(FEED, 1, a, b, payable(challenger));
+        (uint256 left,) = hub.reporters(reporterList[0]);
+        assertEq(left, 0);
     }
 
     function test_SameReportTwiceIsNotEquivocation() public {
