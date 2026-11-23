@@ -244,6 +244,12 @@ importers:
       '@augury/watchtower':
         specifier: workspace:*
         version: link:../watchtower
+      '@qorechain/qoreseal':
+        specifier: 0.1.0
+        version: 0.1.0
+      '@qorechain/sdk':
+        specifier: 0.14.0
+        version: 0.14.0(viem@2.58.4(typescript@5.9.3))
 
   packages/reporter:
     dependencies:
