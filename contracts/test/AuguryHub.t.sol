@@ -101,11 +101,16 @@ contract AuguryHubTest is Test {
         return sha256(leaves);
     }
 
+    function _batchSig(uint64 round, AuguryHub.SignedReport[] memory rs, int256 price)
+        internal
+        view
+        returns (bytes memory)
+    {
+        return _sign(sequencer, hub.batchMessage(FEED, round, price, _root(round, rs), uint32(rs.length)));
+    }
+
     function _post(uint64 round, AuguryHub.SignedReport[] memory rs, int256 price) internal {
-        bytes32 root = _root(round, rs);
-        uint32 count = uint32(rs.length);
-        bytes memory sig = _sign(sequencer, hub.batchMessage(FEED, round, price, root, count));
-        hub.postBatch(FEED, round, price, root, count, sig);
+        hub.postBatch(FEED, round, price, rs, _batchSig(round, rs, price));
     }
 
     function _prices3(int256 a, int256 b, int256 c) internal pure returns (int256[] memory p) {
@@ -260,47 +265,59 @@ contract AuguryHubTest is Test {
 
     function test_RejectsBatchWithBadSignature() public {
         AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
-        bytes32 root = _root(1, rs);
-        bytes memory wrongSig = _sign(reporterList[0], hub.batchMessage(FEED, 1, 101, root, 3));
+        bytes memory wrongSig =
+            _sign(reporterList[0], hub.batchMessage(FEED, 1, 101, _root(1, rs), 3));
         vm.expectRevert(AuguryHub.BadSignature.selector);
-        hub.postBatch(FEED, 1, 101, root, 3, wrongSig);
+        hub.postBatch(FEED, 1, 101, rs, wrongSig);
+    }
+
+    function test_BatchRootComesFromPostedReports() public {
+        AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
+        _post(1, rs, 101);
+        (, bytes32 root, uint32 count,,,) = hub.batches(FEED, 1);
+        assertEq(root, _root(1, rs));
+        assertEq(count, 3);
+    }
+
+    function test_CannotPublishOtherReportsThanSigned() public {
+        AuguryHub.SignedReport[] memory signedFor = _reports(1, _prices3(100, 102, 101));
+        bytes memory sig = _batchSig(1, signedFor, 101);
+        AuguryHub.SignedReport[] memory published = _reports(1, _prices3(1, 1, 1));
+        vm.expectRevert(AuguryHub.BadSignature.selector);
+        hub.postBatch(FEED, 1, 101, published, sig);
     }
 
     function test_RejectsNonIncreasingRound() public {
         _post(2, _reports(2, _prices3(100, 102, 101)), 101);
         AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
-        bytes32 root = _root(1, rs);
-        bytes memory sig = _sign(sequencer, hub.batchMessage(FEED, 1, 101, root, 3));
+        bytes memory sig = _batchSig(1, rs, 101);
         vm.expectRevert(AuguryHub.RoundNotIncreasing.selector);
-        hub.postBatch(FEED, 1, 101, root, 3, sig);
+        hub.postBatch(FEED, 1, 101, rs, sig);
     }
 
     function test_RejectsTooFewReports() public {
         int256[] memory p = new int256[](2);
         (p[0], p[1]) = (100, 101);
         AuguryHub.SignedReport[] memory rs = _reports(1, p);
-        bytes32 root = _root(1, rs);
-        bytes memory sig = _sign(sequencer, hub.batchMessage(FEED, 1, 100, root, 2));
+        bytes memory sig = _batchSig(1, rs, 100);
         vm.expectRevert(AuguryHub.ReportCountOutOfRange.selector);
-        hub.postBatch(FEED, 1, 100, root, 2, sig);
+        hub.postBatch(FEED, 1, 100, rs, sig);
     }
 
     function test_RejectsBatchWithoutBond() public {
         hub.requestBondExit(_sign(sequencer, hub.exitMessage(hub.BOND_EXIT_TAG(), sequencer, 0)));
         AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
-        bytes32 root = _root(1, rs);
-        bytes memory sig = _sign(sequencer, hub.batchMessage(FEED, 1, 101, root, 3));
+        bytes memory sig = _batchSig(1, rs, 101);
         vm.expectRevert(AuguryHub.BondTooLow.selector);
-        hub.postBatch(FEED, 1, 101, root, 3, sig);
+        hub.postBatch(FEED, 1, 101, rs, sig);
     }
 
     function test_FailsClosedWhenPrecompileInactive() public {
         AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
-        bytes32 root = _root(1, rs);
-        bytes memory sig = _sign(sequencer, hub.batchMessage(FEED, 1, 101, root, 3));
+        bytes memory sig = _batchSig(1, rs, 101);
         vm.etch(VERIFY, "");
         vm.expectRevert(AuguryHub.BadSignature.selector);
-        hub.postBatch(FEED, 1, 101, root, 3, sig);
+        hub.postBatch(FEED, 1, 101, rs, sig);
     }
 
     // ---------------------------------------------------------------------------------------

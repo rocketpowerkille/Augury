@@ -317,18 +317,25 @@ contract AuguryHub is IAugury {
 
     /// @notice Post the median of a round, signed by the sequencer's ML-DSA-87 key. Anyone may
     /// relay it.
+    /// @dev The batch's signed reports are part of the call, and the hub derives the report
+    /// root from them. Every batch's reports are therefore public in the transaction data, so
+    /// any watchtower can rebuild them for `challengeBatch`. Signatures are not checked here,
+    /// to keep posting cheap; a bad one is caught by the fraud proof.
     function postBatch(
         bytes32 feedId,
         uint64 round,
         int256 price,
-        bytes32 reportRoot,
-        uint32 reportCount,
+        SignedReport[] calldata reports,
         bytes calldata signature
     ) external {
         if (sequencerBond < minSequencerBond || bondExitRequestedAt != 0) revert BondTooLow();
         if (round <= latestRound[feedId]) revert RoundNotIncreasing();
-        if (reportCount < minReports || reportCount > maxReports) revert ReportCountOutOfRange();
+        if (reports.length < minReports || reports.length > maxReports) {
+            revert ReportCountOutOfRange();
+        }
         if (price <= 0) revert NonPositivePrice();
+        uint32 reportCount = uint32(reports.length);
+        bytes32 reportRoot = _reportRoot(feedId, round, reports);
         if (!_verifyBy(sequencer, batchMessage(feedId, round, price, reportRoot, reportCount), signature))
         {
             revert BadSignature();
@@ -358,15 +365,7 @@ contract AuguryHub is IAugury {
             revert BatchNotChallengeable();
         }
         if (reports.length != b.reportCount) revert ReportCountMismatch();
-
-        bytes memory leaves = new bytes(32 * reports.length);
-        for (uint256 i = 0; i < reports.length; i++) {
-            bytes32 leaf = reportLeaf(feedId, round, reports[i]);
-            assembly ("memory-safe") {
-                mstore(add(add(leaves, 32), mul(i, 32)), leaf)
-            }
-        }
-        if (sha256(leaves) != b.reportRoot) revert RootMismatch();
+        if (_reportRoot(feedId, round, reports) != b.reportRoot) revert RootMismatch();
 
         (bool fraud, FraudKind kind) = _findFraud(feedId, round, b, reports);
         if (!fraud) revert NoFraud();
@@ -450,6 +449,22 @@ contract AuguryHub is IAugury {
     // ---------------------------------------------------------------------------------------
     // Internals
     // ---------------------------------------------------------------------------------------
+
+    /// @dev SHA-256 of the concatenated report leaves, in order.
+    function _reportRoot(bytes32 feedId, uint64 round, SignedReport[] calldata reports)
+        internal
+        view
+        returns (bytes32)
+    {
+        bytes memory leaves = new bytes(32 * reports.length);
+        for (uint256 i = 0; i < reports.length; i++) {
+            bytes32 leaf = reportLeaf(feedId, round, reports[i]);
+            assembly ("memory-safe") {
+                mstore(add(add(leaves, 32), mul(i, 32)), leaf)
+            }
+        }
+        return sha256(leaves);
+    }
 
     function _findFraud(
         bytes32 feedId,
