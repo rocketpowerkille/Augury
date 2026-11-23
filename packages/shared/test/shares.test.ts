@@ -51,7 +51,7 @@ describe("2-of-3 round seed sharing", () => {
   it("rejects a tampered part", () => {
     const { shares, commitments } = splitSeed(freshSeed(), round);
     const bad: MemberShare = structuredClone(shares[0]);
-    bad.parts[0].value[0] ^= 1;
+    bad.parts[0].value[0] = bad.parts[0].value[0]! ^ 1;
     assert.equal(verifyShare(bad, round, commitments), false);
     assert.throws(() => combineShares([bad, shares[1]], round, commitments), /does not match/);
   });

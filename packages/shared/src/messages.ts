@@ -1,5 +1,13 @@
-import { encodeAddress, encodeBytes32, encodeInt256, encodeUint } from "./abi.ts";
-import { concatBytes, sha256, type Hex } from "./bytes.ts";
+import {
+  decodeInt256At,
+  decodeUintAt,
+  encodeAddress,
+  encodeBytes32,
+  encodeInt256,
+  encodeUint,
+  wordAt,
+} from "./abi.ts";
+import { bytesEqual, bytesToHex, concatBytes, hexToBytes, sha256, type Hex } from "./bytes.ts";
 
 /**
  * Byte-exact mirrors of the messages AuguryHub signs and checks. Each one equals the
@@ -54,6 +62,32 @@ export function reportMessage(d: Domain, r: Report): Uint8Array {
     encodeInt256(r.price),
     encodeUint(r.observedAt, 64),
   );
+}
+
+/** Length of a report message: eight 32-byte words. */
+export const REPORT_MESSAGE_LENGTH = 8 * 32;
+
+/**
+ * Read a report message back into its fields. Throws if the message is not a report for
+ * domain `d`, so a message signed for another chain or hub is never accepted.
+ */
+export function decodeReportMessage(d: Domain, message: Uint8Array): Report {
+  if (message.length !== REPORT_MESSAGE_LENGTH) {
+    throw new Error(`report message must be ${REPORT_MESSAGE_LENGTH} bytes`);
+  }
+  if (!bytesEqual(wordAt(message, 0), hexToBytes(TAGS.report))) throw new Error("not a report");
+  if (decodeUintAt(message, 1) !== d.chainId) throw new Error("report for another chain");
+  if (!bytesEqual(wordAt(message, 2), encodeAddress(d.hub))) throw new Error("report for another hub");
+  const report: Report = {
+    feedId: bytesToHex(wordAt(message, 3)),
+    round: decodeUintAt(message, 4),
+    reporter: bytesToHex(wordAt(message, 5).slice(12)),
+    price: decodeInt256At(message, 6),
+    observedAt: decodeUintAt(message, 7),
+  };
+  // Re-encoding must give the same bytes: this rejects out-of-range values and dirty padding.
+  if (!bytesEqual(reportMessage(d, report), message)) throw new Error("malformed report message");
+  return report;
 }
 
 export function batchMessage(d: Domain, b: BatchHeader): Uint8Array {

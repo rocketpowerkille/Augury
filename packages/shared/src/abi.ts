@@ -43,6 +43,28 @@ export function encodeAddress(address: string): Uint8Array {
   return out;
 }
 
+/** The `index`-th 32-byte word of `data` as an unsigned integer. */
+export function decodeUintAt(data: Uint8Array, index: number): bigint {
+  const start = index * WORD;
+  if (start + WORD > data.length) throw new RangeError(`no word ${index} in ${data.length} bytes`);
+  let v = 0n;
+  for (let i = start; i < start + WORD; i++) v = (v << 8n) | BigInt(data[i]!);
+  return v;
+}
+
+/** The `index`-th word as `int256`. */
+export function decodeInt256At(data: Uint8Array, index: number): bigint {
+  const v = decodeUintAt(data, index);
+  return v > INT256_MAX ? v - (1n << 256n) : v;
+}
+
+/** The `index`-th word as raw 32 bytes. */
+export function wordAt(data: Uint8Array, index: number): Uint8Array {
+  const start = index * WORD;
+  if (start + WORD > data.length) throw new RangeError(`no word ${index} in ${data.length} bytes`);
+  return data.slice(start, start + WORD);
+}
+
 /** `bytes32`. */
 export function encodeBytes32(value: string | Uint8Array): Uint8Array {
   const raw = typeof value === "string" ? hexToBytes(value) : value;
