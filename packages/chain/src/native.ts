@@ -39,14 +39,16 @@ export function parseAccountSequence(body: unknown): { accountNumber: bigint; se
 }
 
 /**
- * A gas limit sized from what the transaction carries: a base for execution, plus 20 gas per
- * byte of messages and of the hybrid signature (about 8 KB with ML-DSA-87), roughly twice the
- * usual per-byte charge. Generous on purpose; pass an exact limit to `send` when known.
+ * A gas limit sized from what the transaction carries: a base, 100k per message for its
+ * state writes, and 20 gas per byte of messages and of the hybrid signature (about 8 KB with
+ * ML-DSA-87), roughly twice the usual per-byte charge. Generous on purpose; pass an exact
+ * limit to `send` when known. (Without the per-message term, six bank sends ran out of gas
+ * on testnet: 373,369 used against 372,720.)
  */
 export function gasFor(messages: readonly NativeMessage[]): bigint {
   const registry = auguryRegistry();
   const bytes = messages.reduce((n, m) => n + registry.encodeAsAny(m).value.length, 0);
-  return 200_000n + 20n * BigInt(bytes + 8_000);
+  return 200_000n + 100_000n * BigInt(messages.length) + 20n * BigInt(bytes + 8_000);
 }
 
 /** Fee in uqor for `gas` at `pricePerGas` (a decimal string), rounded up. */
