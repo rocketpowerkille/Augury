@@ -47,16 +47,19 @@
 | T9 | Committee member releases a wrong key part | Parts are checked against SHA-256 commitments published when the round opens | Implemented (shared) |
 | T10 | Reporter exits just before being caught | Exit delay must be at least the challenge window; inactive status is judged at the batch's post time | Implemented (AuguryHub) |
 | T11 | Harvest-now-decrypt-later on private feeds | Values sealed with ML-KEM-1024 via QoreSeal epoch keys | Planned |
+| T12 | Sequencer posts a wrong batch but hides its reports, so nobody can build a fraud proof | `postBatch` takes the signed reports in calldata and the hub derives the report root from them, so every batch's reports are public | Implemented (AuguryHub) |
 
 ## 5. Known gaps and open questions
 
 1. **Omitted reports are not yet provable on the EVM.** The inbox lives on QoreChain's native lane, which AuguryHub cannot read. The watchtower can detect an omission, but slashing for it needs a bridge from inbox data to the hub. Until then, omission is an alert, not a slashable fault.
 2. **Report freshness is not enforced on-chain.** `observedAt` is signed but not checked against the round's time window.
 3. **Two colluding committee members can open reports early** and leak them to a reporter. A larger threshold or time-lock encryption would reduce this.
-4. **The ML-DSA-87 algorithm id** returned by `pqcKeyStatus` is a deploy-time parameter. Its value on `qorechain-diana` must be confirmed before deployment.
-5. **`getPrice` is optimistic.** It returns batches still inside their challenge window. Consumers that need certainty must use `getFinalPrice`.
-6. **A majority of dishonest reporters moves the median.** The median tolerates a minority of bad reporters, not a majority.
-7. **Manipulated source markets** are reported faithfully by honest reporters.
-8. **Liveness.** If fewer than two committee members are online, a round cannot be opened and is skipped; consumers see an older timestamp.
-9. **Slashed funds not paid to challengers stay locked in the hub.** There is deliberately no admin key to move them.
-10. **Testnet only, not audited.**
+4. **The member who deals a round's seed knows it alone.** The planned design rotates the dealer each round, so the 2-of-3 guarantee holds against the other members, not against that round's dealer. Removing the dealer needs distributed key generation for ML-KEM, which is open work for our PQC member.
+5. **Challenger rewards are pushed.** A contract that cannot receive QOR cannot collect a challenger reward, so its challenge reverts. Anyone else can still challenge. Pull-based rewards would remove this.
+6. **The ML-DSA-87 algorithm id** returned by `pqcKeyStatus` is a deploy-time parameter. Its value on `qorechain-diana` must be confirmed before deployment.
+7. **`getPrice` is optimistic.** It returns batches still inside their challenge window. Consumers that need certainty must use `getFinalPrice`.
+8. **A majority of dishonest reporters moves the median.** The median tolerates a minority of bad reporters, not a majority.
+9. **Manipulated source markets** are reported faithfully by honest reporters.
+10. **Liveness.** If fewer than two committee members are online, a round cannot be opened and is skipped; consumers see an older timestamp.
+11. **Slashed funds not paid to challengers stay locked in the hub.** There is deliberately no admin key to move them.
+12. **Testnet only, not audited.**
