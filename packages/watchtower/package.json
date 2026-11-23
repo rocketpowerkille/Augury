@@ -1,0 +1,18 @@
+{
+  "name": "@augury/watchtower",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Augury watchtower: re-check every batch and produce fraud proofs",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@augury/shared": "workspace:*"
+  }
+}
