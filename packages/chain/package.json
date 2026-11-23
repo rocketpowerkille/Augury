@@ -1,0 +1,23 @@
+{
+  "name": "@augury/chain",
+  "version": "0.1.0",
+  "private": true,
+  "description": "QoreChain adapters for Augury: accounts, hybrid-signed native transactions, the rollup inbox and AuguryHub",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@augury/shared": "workspace:*",
+    "@cosmjs/stargate": "^0.39.0",
+    "@qorechain/evm": "0.14.0",
+    "@qorechain/rdk": "0.9.0",
+    "@qorechain/sdk": "0.14.0",
+    "viem": "^2.58.4"
+  }
+}
