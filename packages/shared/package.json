@@ -1,0 +1,15 @@
+{
+  "name": "@augury/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Message formats, aggregation and round-key sharing shared by every Augury component",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit -p ."
+  }
+}
