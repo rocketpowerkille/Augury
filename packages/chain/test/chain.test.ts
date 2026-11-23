@@ -11,6 +11,7 @@ import {
   parseAccountSequence,
   parseDeployment,
   postBatchCalldata,
+  registerKemKeyMessage,
   stakeCalldata,
   testnet,
   toInboxEntries,
@@ -115,6 +116,17 @@ describe("rollup inbox", () => {
     assert.equal(decoded.poster, poster);
     assert.equal(decoded.rollupId, "augury-oracle");
     assert.deepEqual(decoded.data, encodePost(open));
+  });
+
+  it("the Augury registry encodes a KEM key registration", () => {
+    const key = new Uint8Array(1568).fill(7);
+    const registry = auguryRegistry();
+    const decoded = registry.decode(registry.encodeAsAny(registerKemKeyMessage(poster, key))) as {
+      sender: string;
+      publicKey: Uint8Array;
+    };
+    assert.equal(decoded.sender, poster);
+    assert.deepEqual(decoded.publicKey, key);
   });
 
   it("the Augury registry still encodes the SDK's EVM window message", () => {

@@ -1,8 +1,9 @@
-import { bytesToHex, type ChainView, type Hex, type SignedReport } from "@augury/shared";
+import { bytesToHex, hexToBytes, type ChainView, type Hex, type SignedReport } from "@augury/shared";
 import { evmWindowCost, evmWindowStatus, openEvmWindowMessage, pqcKeyStatus } from "@qorechain/evm";
 import {
   createPublicClient,
   createWalletClient,
+  decodeFunctionData,
   defineChain,
   encodeFunctionData,
   http,
@@ -120,6 +121,59 @@ export async function loadChainView(
     reporterKey: (a) => keys.get(a.toLowerCase()),
     isActive: (a) => active.has(a.toLowerCase()),
   };
+}
+
+/** AuguryHub.latestRound for each feed, keyed by lowercase feed id. */
+export async function latestRounds(client: PublicClient, hub: Hex, feeds: readonly Hex[]): Promise<Map<string, bigint>> {
+  const out = new Map<string, bigint>();
+  for (const feedId of feeds) {
+    const round = await client.readContract({ address: hub, abi: auguryHubAbi, functionName: "latestRound", args: [feedId] });
+    out.set(feedId.toLowerCase(), round);
+  }
+  return out;
+}
+
+/** A batch as posted to the hub, rebuilt from the postBatch transaction's calldata. */
+export interface PostedBatchOnChain {
+  txHash: Hex;
+  blockNumber: bigint;
+  header: { feedId: Hex; round: bigint; price: bigint; reportRoot: Hex; reportCount: number };
+  reports: SignedReport[];
+}
+
+/**
+ * Every batch posted since `fromBlock`. The reports come from the transaction's calldata,
+ * which AuguryHub requires to carry them, so every batch can be checked and challenged.
+ */
+export async function postedBatches(client: PublicClient, hub: Hex, fromBlock: bigint): Promise<PostedBatchOnChain[]> {
+  const logs = await client.getContractEvents({ address: hub, abi: auguryHubAbi, eventName: "BatchPosted", fromBlock });
+  const out: PostedBatchOnChain[] = [];
+  for (const log of logs) {
+    const tx = await client.getTransaction({ hash: log.transactionHash });
+    const call = decodeFunctionData({ abi: auguryHubAbi, data: tx.input });
+    if (call.functionName !== "postBatch") continue;
+    const [feedId, round, price, reports] = call.args;
+    out.push({
+      txHash: log.transactionHash,
+      blockNumber: log.blockNumber,
+      header: {
+        feedId,
+        round,
+        price,
+        reportRoot: log.args.reportRoot!,
+        reportCount: Number(log.args.reportCount!),
+      },
+      reports: reports.map((r) => ({
+        feedId,
+        round,
+        reporter: r.reporter.toLowerCase() as Hex,
+        price: r.price,
+        observedAt: r.observedAt,
+        signature: hexToBytes(r.signature),
+      })),
+    });
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------------------------------
