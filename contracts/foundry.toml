@@ -12,3 +12,7 @@ via_ir = true
 
 [fmt]
 line_length = 100
+
+[lint]
+# Immutables are public getters read by the TypeScript packages, so they keep camelCase.
+exclude_lints = ["screaming-snake-case-immutable"]
