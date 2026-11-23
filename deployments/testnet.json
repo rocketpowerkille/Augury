@@ -1,6 +1,6 @@
 {
   "network": "testnet",
-  "hub": "0x86a901909cad74ee281622243dac06c6c33d6236",
+  "hub": "0x49bc74d9ad38f805f52984cc2f6d338429b4d3bd",
   "rollupId": "augury-oracle",
   "committee": [
     "0x72414e9be0215bf5db2752c773b554dee1ca53ce",
