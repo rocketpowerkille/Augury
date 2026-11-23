@@ -48,7 +48,11 @@ export interface DealArgs {
   feedId: Hex;
   round: bigint;
   closeHeight: bigint;
-  /** QoreSeal recipients of members 0, 1 and 2. */
+  /**
+   * ML-KEM-1024 keys of members 0, 1 and 2, as published in the chain's KEM key registry.
+   * Deliveries are sealed in QoreSeal's ML-KEM-only mode, because the registry holds the
+   * ML-KEM key alone.
+   */
   members: readonly [SealRecipient, SealRecipient, SealRecipient];
   /** Injectable for tests only. */
   seed?: Uint8Array;
@@ -82,7 +86,8 @@ export function dealRound(args: DealArgs): Deal {
       envelope: seal({
         chainId: args.sealChainId,
         purpose: SHARE_SEAL_PURPOSE,
-        recipients: [args.members[s.member]],
+        mode: "mlkem",
+        recipients: [{ mlkemPublicKey: args.members[s.member].mlkemPublicKey }],
         plaintext: encodePost(postFromShare(args.feedId, args.round, s)),
         aad: deliveryAad(args.feedId, args.round, s.member),
       }),
