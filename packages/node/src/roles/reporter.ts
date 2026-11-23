@@ -1,5 +1,5 @@
 import { evmAddress, inboxPostMessage, NativeSender } from "@augury/chain";
-import { buildReportPost, observePrice, type FeedName } from "@augury/reporter";
+import { buildReportPosts, observePrice, type FeedName } from "@augury/reporter";
 import { FEEDS, type Hex } from "@augury/shared";
 import type { UnifiedAccount } from "@qorechain/sdk";
 import { planReporter } from "../plan.ts";
@@ -40,7 +40,7 @@ export async function runReporter(ctx: NodeContext, opts: ReporterOptions): Prom
       for (const open of rounds) {
         const name = byId.get(open.feedId.toLowerCase())!;
         const observation = await observePrice(name);
-        const post = buildReportPost({
+        const posts = buildReportPosts({
           domain: ctx.cfg.domain,
           sealChainId: ctx.net.chainId,
           reporter: me,
@@ -49,7 +49,8 @@ export async function runReporter(ctx: NodeContext, opts: ReporterOptions): Prom
           price: observation.price,
           observedAt: BigInt(Math.floor(Date.now() / 1000)),
         });
-        const tx = await native.send([inboxPostMessage(native.address, ctx.deployment.rollupId, post)]);
+        // Both posts in one transaction, so they sit next to each other in the inbox.
+        const tx = await native.send(posts.map((p) => inboxPostMessage(native.address, ctx.deployment.rollupId, p)));
         ctx.log(`reported ${name} round ${open.round} from ${observation.used.join("+")} (tx ${tx.hash})`);
       }
     },
