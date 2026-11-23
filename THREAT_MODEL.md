@@ -48,6 +48,7 @@
 | T10 | Reporter exits just before being caught | Exit delay must be at least the challenge window; inactive status is judged at the batch's post time | Implemented (AuguryHub) |
 | T11 | Harvest-now-decrypt-later on private feeds | Values sealed with ML-KEM-1024 via QoreSeal epoch keys | Planned |
 | T12 | Sequencer posts a wrong batch but hides its reports, so nobody can build a fraud proof | `postBatch` takes the signed reports in calldata and the hub derives the report root from them, so every batch's reports are public | Implemented (AuguryHub) |
+| T13 | A report's signature is public before the close (rollup posts are capped at 6,144 bytes, so it cannot ride inside the sealed envelope), and prices are guessable, so an observer could test candidate prices against it | The signed message includes 32 random bytes of salt that travel only inside the sealed envelope; without them a guessed price cannot be checked against the signature. Two different signed reports for one round are equivocation even at the same price | Implemented (AuguryHub, shared) |
 
 ## 5. Known gaps and open questions
 
