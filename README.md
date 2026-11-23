@@ -295,7 +295,40 @@ pnpm --filter @augury/shared check:precompile   # read-only check against the te
 pnpm clean            # delete node_modules, .pnpm-store and build output
 ```
 
-Deploying and running against `qorechain-diana` needs a QoreX wallet with test QOR from the faucet; those steps will be documented once the chain adapters land.
+### Running on the testnet
+
+Every script that sends a transaction is a dry run unless you pass `--execute`. Account files hold mnemonics and live in `secrets/`, which git ignores.
+
+1. **Create accounts**: one sequencer, three committee members, at least three reporters (the hub needs three reports per round) and a watchtower.
+   ```sh
+   node packages/node/scripts/new-account.ts sequencer
+   node packages/node/scripts/new-account.ts committee-0   # also committee-1, committee-2
+   node packages/node/scripts/new-account.ts reporter-0    # also reporter-1, reporter-2
+   node packages/node/scripts/new-account.ts watchtower
+   ```
+2. **Fund them** with test QOR from the faucet. Creating the rollup needs a 10,000 QOR stake from the sequencer (1% is burned); posting to the inbox costs 10 uqor per byte.
+3. **Register keys**: every account registers its ML-DSA-87 key; committee members also publish an ML-KEM-1024 key.
+   ```sh
+   node packages/node/scripts/setup-account.ts --account secrets/reporter-0.json --execute
+   node packages/node/scripts/setup-account.ts --account secrets/committee-0.json --kem --execute
+   ```
+4. **Deploy** the rollup and AuguryHub, and bond the sequencer. This writes `deployments/testnet.json`.
+   ```sh
+   node packages/node/scripts/deploy.ts --account secrets/sequencer.json --committee 0x…,0x…,0x… --execute
+   ```
+5. **Stake** each reporter (1 QOR by default):
+   ```sh
+   node packages/node/scripts/stake.ts --account secrets/reporter-0.json --execute
+   ```
+6. **Run the roles**, each in its own terminal:
+   ```sh
+   pnpm augury committee  --account secrets/committee-0.json
+   pnpm augury reporter   --account secrets/reporter-0.json
+   pnpm augury sequencer  --account secrets/sequencer.json
+   pnpm augury watchtower --account secrets/watchtower.json
+   ```
+
+Every EVM call to the hub goes through an EVM window that the account opens with a hybrid-signed (secp256k1 + ML-DSA-87) native transaction and that is scoped to the hub address alone.
 
 ## Roadmap
 
@@ -306,7 +339,9 @@ Done means built and tested locally. Nothing is deployed yet; on-chain proof wil
 - [x] Committee, reporter, sequencer and watchtower logic, with an end-to-end round test
 - [x] Read-only check that the testnet `pqcVerify` precompile accepts our signatures
 - [x] CI: contracts and TypeScript on every push
-- [ ] Chain adapters: RDK rollup inbox, AuguryHub calls, settlement receipts
+- [x] Chain adapters: verified inbox reads (checked live on testnet), inbox posts, AuguryHub calls through hub-scoped EVM windows, KEM registry, PQC key registration
+- [x] Node: committee, reporter, sequencer and watchtower roles; account, deploy and stake scripts (dry run by default)
+- [ ] Settlement receipts: anchor rollup batches with the creator's ML-DSA-87 key
 - [ ] Deployment to `qorechain-diana` and registered PQC keys
 - [ ] QOR/USD feed from a TWAP of QoreChain's AMM pools
 - [ ] Withdrawals with verified settlement receipts
