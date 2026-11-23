@@ -1,0 +1,20 @@
+{
+  "name": "@augury/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "End-to-end tests of a full Augury round across committee, reporters, sequencer and watchtower",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@augury/committee": "workspace:*",
+    "@augury/reporter": "workspace:*",
+    "@augury/sequencer": "workspace:*",
+    "@augury/shared": "workspace:*",
+    "@augury/watchtower": "workspace:*",
+    "@qorechain/qoreseal": "0.1.0"
+  }
+}

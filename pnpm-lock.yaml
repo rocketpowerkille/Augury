@@ -182,7 +182,34 @@ importers:
         specifier: 0.1.0
         version: 0.1.0
 
+  packages/e2e:
+    dependencies:
+      '@augury/committee':
+        specifier: workspace:*
+        version: link:../committee
+      '@augury/reporter':
+        specifier: workspace:*
+        version: link:../reporter
+      '@augury/sequencer':
+        specifier: workspace:*
+        version: link:../sequencer
+      '@augury/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@augury/watchtower':
+        specifier: workspace:*
+        version: link:../watchtower
+      '@qorechain/qoreseal':
+        specifier: 0.1.0
+        version: 0.1.0
+
   packages/reporter:
+    dependencies:
+      '@augury/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/sequencer:
     dependencies:
       '@augury/shared':
         specifier: workspace:*
@@ -196,6 +223,12 @@ importers:
       '@qorechain/qoreseal':
         specifier: 0.1.0
         version: 0.1.0
+
+  packages/watchtower:
+    dependencies:
+      '@augury/shared':
+        specifier: workspace:*
+        version: link:../shared
 
 packages:
 
