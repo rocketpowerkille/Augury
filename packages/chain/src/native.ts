@@ -67,15 +67,23 @@ export class NativeSender {
   private readonly signer: EthNativeSigner;
   private readonly transport: StargateClient;
 
-  private constructor(net: Network, account: UnifiedAccount, transport: StargateClient) {
+  private constructor(net: Network, account: UnifiedAccount, transport: StargateClient, signMode: "hybrid" | "classical") {
     this.net = net;
     this.address = account.cosmos;
-    this.signer = new EthNativeSigner(account, { rest: net.rest, registry: auguryRegistry() });
+    this.signer = new EthNativeSigner(account, { rest: net.rest, registry: auguryRegistry(), signMode });
     this.transport = transport;
   }
 
-  static async connect(net: Network, account: UnifiedAccount): Promise<NativeSender> {
-    return new NativeSender(net, account, await StargateClient.connect(net.rpc));
+  /**
+   * `signMode: "classical"` exists only for the one-time, bootstrap-exempt registration of the
+   * account's PQC key (`pqcRegistrationMessage`); everything else is signed hybrid.
+   */
+  static async connect(
+    net: Network,
+    account: UnifiedAccount,
+    opts: { signMode?: "hybrid" | "classical" } = {},
+  ): Promise<NativeSender> {
+    return new NativeSender(net, account, await StargateClient.connect(net.rpc), opts.signMode ?? "hybrid");
   }
 
   async accountSequence(): Promise<{ accountNumber: bigint; sequence: bigint }> {

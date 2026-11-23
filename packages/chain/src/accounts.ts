@@ -1,6 +1,14 @@
 import { readFileSync } from "node:fs";
-import type { Hex } from "@augury/shared";
-import { deriveUnifiedAccount, validateMnemonic, type UnifiedAccount } from "@qorechain/sdk";
+import { hexToBytes, type Hex } from "@augury/shared";
+import {
+  AlgorithmDilithium5,
+  buildRegisterPqcKeyMsg,
+  deriveUnifiedAccount,
+  signProofOfPossession,
+  validateMnemonic,
+  type UnifiedAccount,
+} from "@qorechain/sdk";
+import type { NativeMessage } from "./native.ts";
 
 /**
  * Accounts are unified eth_secp256k1 identities: one key gives the same 20-byte account on
@@ -27,6 +35,23 @@ export async function loadAccount(path: string): Promise<UnifiedAccount> {
     throw new Error(`account file ${path} does not hold a valid mnemonic`);
   }
   return deriveUnifiedAccount(mnemonic);
+}
+
+/**
+ * `MsgRegisterPQCKeyV2` registering the account's ML-DSA-87 key, with the key's proof of
+ * possession, so the chain knows the account holds the secret half.
+ */
+export function pqcRegistrationMessage(account: UnifiedAccount, chainId: string): NativeMessage {
+  return buildRegisterPqcKeyMsg(account.cosmos, {
+    pqcKeypair: account.pqc,
+    ecdsaPubkey: hexToBytes(account.publicKey),
+    proofOfPossession: signProofOfPossession({
+      chainId,
+      account: account.cosmos,
+      keypair: account.pqc,
+      algorithmId: AlgorithmDilithium5,
+    }),
+  });
 }
 
 /** The account's EVM address, lowercase. */

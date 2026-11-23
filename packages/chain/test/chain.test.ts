@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { encodePost, FEEDS, type SignedReport } from "@augury/shared";
-import { qorechainRegistry, evmToQor } from "@qorechain/sdk";
+import { deriveUnifiedAccount, evmToQor, qorechainRegistry, verifyProofOfPossession } from "@qorechain/sdk";
 import { openEvmWindowMessage } from "@qorechain/evm";
 import {
   auguryRegistry,
@@ -12,6 +12,7 @@ import {
   parseAccountSequence,
   parseDeployment,
   postBatchCalldata,
+  pqcRegistrationMessage,
   registerKemKeyMessage,
   stakeCalldata,
   testnet,
@@ -56,6 +57,45 @@ describe("network and deployment", () => {
     assert.throws(() => parseDeployment({ ...valid, hub: "0x12" }), /hub/);
     assert.throws(() => parseDeployment({ ...valid, committee: valid.committee.slice(0, 2) }), /committee/);
     assert.throws(() => parseDeployment({ ...valid, maxReports: 2 }), /maxReports/);
+  });
+});
+
+describe("accounts", () => {
+  // A well-known BIP-39 test mnemonic: never use it for anything real.
+  const TEST_MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+  it("builds a PQC key registration whose proof of possession verifies", async () => {
+    const account = await deriveUnifiedAccount(TEST_MNEMONIC);
+    const msg = pqcRegistrationMessage(account, "qorechain-diana");
+    const registry = auguryRegistry();
+    const decoded = registry.decode(registry.encodeAsAny(msg)) as {
+      sender: string;
+      algorithmId: number;
+      dilithiumPubkey: Uint8Array;
+      proofOfPossession: Uint8Array;
+    };
+    assert.equal(decoded.sender, account.cosmos);
+    assert.equal(decoded.algorithmId, 1);
+    assert.equal(
+      verifyProofOfPossession({
+        chainId: "qorechain-diana",
+        account: account.cosmos,
+        publicKey: account.pqc.publicKey,
+        algorithmId: 1,
+        proof: decoded.proofOfPossession,
+      }),
+      true,
+    );
+    assert.equal(
+      verifyProofOfPossession({
+        chainId: "qorechain-vladi",
+        account: account.cosmos,
+        publicKey: account.pqc.publicKey,
+        algorithmId: 1,
+        proof: decoded.proofOfPossession,
+      }),
+      false,
+    );
   });
 });
 
