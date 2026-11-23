@@ -182,6 +182,12 @@ importers:
         specifier: 0.1.0
         version: 0.1.0
 
+  packages/reporter:
+    dependencies:
+      '@augury/shared':
+        specifier: workspace:*
+        version: link:../shared
+
   packages/shared:
     dependencies:
       '@qorechain/pqc':

@@ -1,0 +1,18 @@
+{
+  "name": "@augury/reporter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Augury reporter: observe a price, sign it with ML-DSA-87 and seal it to the round key",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@augury/shared": "workspace:*"
+  }
+}
