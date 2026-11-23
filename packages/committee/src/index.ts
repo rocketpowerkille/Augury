@@ -63,7 +63,10 @@ export interface Deal {
   open: RoundOpen;
   /** The dealer's own share, kept locally. */
   ownShare: MemberShare;
-  /** Each other member's share, sealed to that member. */
+  /**
+   * Every member's share sealed to that member, the dealer's own included. Posted to the
+   * inbox, they let any member (the dealer too) recover its share after a restart.
+   */
   deliveries: Delivery[];
 }
 
@@ -74,9 +77,7 @@ export function dealRound(args: DealArgs): Deal {
   const { shares, commitments } = splitSeed(seed, args.round);
   seed.fill(0);
 
-  const deliveries: Delivery[] = shares
-    .filter((s) => s.member !== dealer)
-    .map((s) => ({
+  const deliveries: Delivery[] = shares.map((s) => ({
       member: s.member,
       envelope: seal({
         chainId: args.sealChainId,

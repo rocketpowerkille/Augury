@@ -20,11 +20,13 @@ function deal() {
   return dealRound({ sealChainId, feedId: FEEDS["fETH/USD"], round, closeHeight: 100n, members });
 }
 
+/** Every member's share, as each member opens it from its delivery, indexed by member. */
 function acceptAll(d: ReturnType<typeof deal>): MemberShare[] {
-  const received = d.deliveries.map((x) =>
-    acceptDelivery({ sealChainId, member: x.member, keys: memberKeys[x.member], open: d.open, envelope: x.envelope }),
-  );
-  return [d.ownShare, ...received];
+  return [...d.deliveries]
+    .sort((a, b) => a.member - b.member)
+    .map((x) =>
+      acceptDelivery({ sealChainId, member: x.member, keys: memberKeys[x.member], open: d.open, envelope: x.envelope }),
+    );
 }
 
 describe("committee", () => {
@@ -33,10 +35,13 @@ describe("committee", () => {
     assert.equal(deal().open.dealer, 1);
   });
 
-  it("delivers a share to each other member", () => {
+  it("delivers a sealed share to every member, the dealer included", () => {
     const d = deal();
-    assert.deepEqual(d.deliveries.map((x) => x.member).sort(), [0, 2]);
+    assert.deepEqual(d.deliveries.map((x) => x.member).sort(), [0, 1, 2]);
     assert.equal(d.ownShare.member, 1);
+    const own = d.deliveries.find((x) => x.member === 1)!;
+    const recovered = acceptDelivery({ sealChainId, member: 1, keys: memberKeys[1], open: d.open, envelope: own.envelope });
+    assert.deepEqual(recovered, d.ownShare);
   });
 
   it("any two released shares rebuild the published round key", () => {
