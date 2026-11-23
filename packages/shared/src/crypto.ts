@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { mldsa87 } from "@qorechain/pqc";
 import {
   open,
@@ -8,7 +9,7 @@ import {
   type SealRecipient,
 } from "@qorechain/qoreseal";
 import { encodeAddress, encodeBytes32, encodeUint } from "./abi.ts";
-import { concatBytes } from "./bytes.ts";
+import { bytesToHex, concatBytes } from "./bytes.ts";
 import {
   batchMessage,
   decodeReportMessage,
@@ -104,24 +105,31 @@ export function reportAad(d: Domain, feedId: Report["feedId"], round: bigint): U
   );
 }
 
+/** 32 fresh random bytes for a report's salt. */
+export function newSalt(): Report["salt"] {
+  return bytesToHex(new Uint8Array(randomBytes(32)));
+}
+
 export interface SealReportArgs {
   /** Native QoreChain chain id used by QoreSeal, e.g. `qorechain-diana`. */
   sealChainId: string;
   domain: Domain;
   recipient: SealRecipient;
-  report: SignedReport;
+  report: Report;
 }
 
-/** Seal a signed report to the round key. The envelope reveals nothing about the price. */
+/**
+ * Seal a report's signed message (salt included) to the round key. The signature is posted
+ * separately, in the clear: rollup posts are limited to 6,144 bytes and an ML-DSA-87
+ * signature alone is 4,627. The sealed salt keeps the public signature from revealing the
+ * price.
+ */
 export function sealReport({ sealChainId, domain, recipient, report }: SealReportArgs): Uint8Array {
-  if (report.signature.length !== ML_DSA_87_SIGNATURE_LENGTH) {
-    throw new Error(`signature must be ${ML_DSA_87_SIGNATURE_LENGTH} bytes`);
-  }
   return seal({
     chainId: sealChainId,
     purpose: REPORT_SEAL_PURPOSE,
     recipients: [recipient],
-    plaintext: concatBytes(reportMessage(domain, report), report.signature),
+    plaintext: reportMessage(domain, report),
     aad: reportAad(domain, report.feedId, report.round),
   });
 }
@@ -138,10 +146,10 @@ export interface OpenReportArgs {
 
 /**
  * Open a sealed report with the round key. Throws if the envelope was sealed for another
- * feed, round or domain, or if its contents are malformed. The signature is not checked
- * here; call `verifyReport` with the reporter's registered key.
+ * feed, round or domain, or if its contents are malformed. Pair the result with the
+ * report's signature post and check it with `verifyReport`.
  */
-export function openReport(args: OpenReportArgs): SignedReport {
+export function openReport(args: OpenReportArgs): Report {
   const plaintext = open({
     chainId: args.sealChainId,
     purpose: REPORT_SEAL_PURPOSE,
@@ -149,12 +157,10 @@ export function openReport(args: OpenReportArgs): SignedReport {
     keys: args.keys,
     aad: reportAad(args.domain, args.feedId, args.round),
   });
-  if (plaintext.length !== REPORT_MESSAGE_LENGTH + ML_DSA_87_SIGNATURE_LENGTH) {
-    throw new Error("sealed report has the wrong length");
-  }
-  const report = decodeReportMessage(args.domain, plaintext.subarray(0, REPORT_MESSAGE_LENGTH));
+  if (plaintext.length !== REPORT_MESSAGE_LENGTH) throw new Error("sealed report has the wrong length");
+  const report = decodeReportMessage(args.domain, plaintext);
   if (report.feedId.toLowerCase() !== args.feedId.toLowerCase() || report.round !== args.round) {
     throw new Error("sealed report is for another feed or round");
   }
-  return { ...report, signature: plaintext.slice(REPORT_MESSAGE_LENGTH) };
+  return report;
 }

@@ -17,7 +17,7 @@ import { bytesEqual, bytesToHex, concatBytes, hexToBytes, sha256, type Hex } fro
 
 /** keccak256 of each tag string, as declared in AuguryHub. Checked against the contract in tests. */
 export const TAGS = {
-  report: "0xa5f89c188aa63a96e907dc1110f53cb69ec04e2cb9dc587a4ee7c41f6eb9ae5b",
+  report: "0xde27b797c84cbdc91a7c574a77ca25092b7ae1342f803884235a3775df6eafba",
   batch: "0x2360d05af57c90d2666345da3fbbeaa6d5b62565e01282b906e9abf7287cd413",
   reporterExit: "0x0b419c48f0845fdbb68f3a9f58252d2d204e4588774a4262a5b6c0d87e1e4145",
   reporterWithdraw: "0x37b6364c94d7831cde44bed5ea7b3fff4290cd7077dc378636c7d49078ce0280",
@@ -39,6 +39,12 @@ export interface Report {
   price: bigint;
   /** Unix seconds when the reporter observed the price. */
   observedAt: bigint;
+  /**
+   * 32 random bytes chosen by the reporter. The signature is published before the round
+   * closes while the rest stays sealed; the salt stops anyone testing candidate prices
+   * against that public signature.
+   */
+  salt: Hex;
 }
 
 export interface BatchHeader {
@@ -61,11 +67,12 @@ export function reportMessage(d: Domain, r: Report): Uint8Array {
     encodeAddress(r.reporter),
     encodeInt256(r.price),
     encodeUint(r.observedAt, 64),
+    encodeBytes32(r.salt),
   );
 }
 
-/** Length of a report message: eight 32-byte words. */
-export const REPORT_MESSAGE_LENGTH = 8 * 32;
+/** Length of a report message: nine 32-byte words. */
+export const REPORT_MESSAGE_LENGTH = 9 * 32;
 
 /**
  * Read a report message back into its fields. Throws if the message is not a report for
@@ -84,6 +91,7 @@ export function decodeReportMessage(d: Domain, message: Uint8Array): Report {
     reporter: bytesToHex(wordAt(message, 5).slice(12)),
     price: decodeInt256At(message, 6),
     observedAt: decodeUintAt(message, 7),
+    salt: bytesToHex(wordAt(message, 8)),
   };
   // Re-encoding must give the same bytes: this rejects out-of-range values and dirty padding.
   if (!bytesEqual(reportMessage(d, report), message)) throw new Error("malformed report message");

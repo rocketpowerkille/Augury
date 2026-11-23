@@ -5,6 +5,7 @@ import {
   decodeReportMessage,
   FEEDS,
   generateSigningKey,
+  newSalt,
   ML_DSA_87_PUBLIC_KEY_LENGTH,
   ML_DSA_87_SIGNATURE_LENGTH,
   openReport,
@@ -30,6 +31,7 @@ const report: Report = {
   reporter: "0x2222222222222222222222222222222222222222",
   price: 9712345000000n,
   observedAt: 1764000000n,
+  salt: `0x${"77".repeat(32)}`,
 };
 
 describe("ML-DSA-87 report and batch signatures", () => {
@@ -91,14 +93,24 @@ describe("sealed reports", () => {
   const envelope = sealReport({ sealChainId, domain, recipient: roundRecipient(keys), report: signed });
   const openArgs = { sealChainId, domain, keys, envelope, feedId: report.feedId, round: report.round };
 
-  it("open with the round key to the same signed report", () => {
+  it("open with the round key to the same report, which the separate signature verifies", () => {
     const opened = openReport(openArgs);
-    assert.deepEqual(opened, signed);
-    assert.equal(verifyReport(reporterKey.publicKey, domain, opened), true);
+    assert.deepEqual(opened, report);
+    assert.equal(verifyReport(reporterKey.publicKey, domain, { ...opened, signature: signed.signature }), true);
+  });
+
+  it("seal only the message: the envelope fits under the 6,144-byte post limit", () => {
+    assert.ok(envelope.length < 2_100, `envelope is ${envelope.length} bytes`);
   });
 
   it("the same seed rebuilds the same round key", () => {
-    assert.deepEqual(openReport({ ...openArgs, keys: roundKeys(seed) }), signed);
+    assert.deepEqual(openReport({ ...openArgs, keys: roundKeys(seed) }), report);
+  });
+
+  it("the public signature does not reveal the price without the sealed salt", () => {
+    // An observer who guesses the exact price but not the salt cannot confirm the guess.
+    const guess = { ...report, salt: newSalt() };
+    assert.equal(verifyReport(reporterKey.publicKey, domain, { ...guess, signature: signed.signature }), false);
   });
 
   it("do not open with another round's key", () => {
