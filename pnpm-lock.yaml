@@ -173,6 +173,15 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/committee:
+    dependencies:
+      '@augury/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@qorechain/qoreseal':
+        specifier: 0.1.0
+        version: 0.1.0
+
   packages/shared:
     dependencies:
       '@qorechain/pqc':

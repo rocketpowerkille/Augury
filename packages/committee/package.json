@@ -1,0 +1,19 @@
+{
+  "name": "@augury/committee",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Round key dealing, share delivery and share release for the Augury key committee",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@augury/shared": "workspace:*",
+    "@qorechain/qoreseal": "0.1.0"
+  }
+}
