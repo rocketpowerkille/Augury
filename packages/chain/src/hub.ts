@@ -12,7 +12,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { UnifiedAccount } from "@qorechain/sdk";
-import { auguryHubAbi } from "./abi/auguryHub.ts";
+import { auguryHubAbi, auguryHubBytecode } from "./abi/auguryHub.ts";
 import type { NativeSender } from "./native.ts";
 import type { Network } from "./network.ts";
 
@@ -174,6 +174,80 @@ export async function postedBatches(client: PublicClient, hub: Hex, fromBlock: b
     });
   }
   return out;
+}
+
+// ------------------------------------------------------------------------------------------
+// Deployment
+// ------------------------------------------------------------------------------------------
+
+export interface HubParams {
+  sequencer: Hex;
+  mldsaAlgorithmId: number;
+  /** In wei (QOR has 18 decimals on the EVM lane). */
+  minReporterStake: bigint;
+  minSequencerBond: bigint;
+  /** Seconds. */
+  challengeWindow: bigint;
+  exitDelay: bigint;
+  minReports: number;
+  maxReports: number;
+}
+
+/**
+ * Deploy AuguryHub from `account`. Contract creation is refused inside a target-scoped
+ * window, so this opens an unscoped window that admits exactly one transaction.
+ */
+export async function deployAuguryHub(opts: {
+  net: Network;
+  account: UnifiedAccount;
+  native: NativeSender;
+  params: HubParams;
+}): Promise<{ address: Hex; txHash: Hex }> {
+  const client = publicClient(opts.net);
+  const wallet = createWalletClient({
+    account: privateKeyToAccount(opts.account.privateKey as Hex),
+    chain: evmChain(opts.net),
+    transport: http(opts.net.evmRpc),
+  });
+  const p = opts.params;
+  const args = [
+    p.sequencer,
+    p.mldsaAlgorithmId,
+    p.minReporterStake,
+    p.minSequencerBond,
+    p.challengeWindow,
+    p.exitDelay,
+    p.minReports,
+    p.maxReports,
+  ] as const;
+
+  const gas = 6_000_000n;
+  const fees = await client.estimateFeesPerGas();
+  await opts.native.send(
+    [
+      openEvmWindowMessage({
+        sender: opts.native.address,
+        blocks: 200n,
+        maxTxs: 1n,
+        maxValue: evmWindowCost({ gas, maxFeePerGas: fees.maxFeePerGas }).toString(),
+      }),
+    ],
+    300_000n,
+    "augury: one-transaction window to deploy AuguryHub",
+  );
+  const nonce = await client.getTransactionCount({ address: wallet.account.address, blockTag: "pending" });
+  const txHash = await wallet.deployContract({
+    abi: auguryHubAbi,
+    bytecode: auguryHubBytecode,
+    args,
+    gas,
+    nonce,
+    maxFeePerGas: fees.maxFeePerGas,
+    maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+  });
+  const receipt = await client.waitForTransactionReceipt({ hash: txHash });
+  if (receipt.status !== "success" || !receipt.contractAddress) throw new Error(`deployment ${txHash} failed`);
+  return { address: receipt.contractAddress.toLowerCase() as Hex, txHash };
 }
 
 // ------------------------------------------------------------------------------------------

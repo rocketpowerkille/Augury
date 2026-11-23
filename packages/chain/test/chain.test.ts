@@ -6,6 +6,7 @@ import { openEvmWindowMessage } from "@qorechain/evm";
 import {
   auguryRegistry,
   challengeBatchCalldata,
+  createRollupMessage,
   feeFor,
   gasFor,
   inboxPostMessage,
@@ -170,6 +171,20 @@ describe("rollup inbox", () => {
     assert.equal(decoded.poster, poster);
     assert.equal(decoded.rollupId, "augury-oracle");
     assert.deepEqual(decoded.data, encodePost(open));
+  });
+
+  it("builds a based, qledger-v1 rollup creation and rejects bad input", () => {
+    const registry = auguryRegistry();
+    const decoded = registry.decode(registry.encodeAsAny(createRollupMessage(poster, "augury-oracle", 10_000_000_000n))) as {
+      rollupId: string;
+      sequencing: string;
+      executionVm: string;
+    };
+    assert.equal(decoded.rollupId, "augury-oracle");
+    assert.equal(decoded.sequencing, "based");
+    assert.equal(decoded.executionVm, "qledger-v1");
+    assert.throws(() => createRollupMessage(poster, "Augury/Oracle", 10_000_000_000n), /rollup id/);
+    assert.throws(() => createRollupMessage(poster, "augury-oracle", 1n), /at least/);
   });
 
   it("the Augury registry encodes a KEM key registration", () => {
