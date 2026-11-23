@@ -1,0 +1,306 @@
+# Augury
+
+**A post-quantum oracle network, built as a rollup on QoreChain. Prices nobody can copy, fake, or forge, even after Q-Day.**
+
+Built for [Build Before Q-Day](https://build.qorechain.io), the QoreChain Developer Fest, in the **Protocol Builders** category.
+
+> **Status: in development.** This README describes the design we are building. Nothing below is live yet. As each part ships on the `qorechain-diana` testnet, its proof (transaction hashes, contract addresses, receipts) will be listed in [`EVIDENCE.md`](EVIDENCE.md).
+
+---
+
+## Contents
+
+- [The problem](#the-problem)
+- [What Augury does](#what-augury-does)
+- [How a round works](#how-a-round-works)
+- [Architecture](#architecture)
+- [Cryptographic design](#cryptographic-design)
+- [The watchtower and fraud proofs](#the-watchtower-and-fraud-proofs)
+- [Staking, rewards and withdrawal](#staking-rewards-and-withdrawal)
+- [Private feeds](#private-feeds)
+- [Using Augury from a contract](#using-augury-from-a-contract)
+- [Protocol Builders requirements](#protocol-builders-requirements)
+- [QoreChain kits and network features](#qorechain-kits-and-network-features)
+- [Security model](#security-model)
+- [Repository layout](#repository-layout)
+- [Getting started](#getting-started)
+- [Roadmap](#roadmap)
+- [Credits](#credits)
+- [License](#license)
+
+---
+
+## The problem
+
+Every DeFi application trusts a price: lending markets to decide liquidations, baskets to rebalance, agents to decide when to buy. Whoever controls the price controls the money behind it.
+
+1. **QoreChain has no oracle network yet.** Applications sign their own prices with a single reporter key, so one key sets every price.
+2. **Oracles are the single point of failure on Q-Day.** A quantum computer that recovers a classical signing key can forge price reports, and every protocol that trusts them can be drained at once.
+3. **Oracle networks have an old incentive flaw: freeloading.** Reporters are paid for agreeing with the consensus, so a lazy reporter can wait, copy the others and still get paid. The usual fix is commit-reveal (post a hash of your value first, reveal it later), but that opens a second hole: a reporter who has seen the other reveals can refuse to reveal their own, which gives them an option to cheat.
+
+## What Augury does
+
+Augury is an oracle network whose every step that moves trust is post-quantum:
+
+- **Staked reporters** sign each price with **ML-DSA-87** and seal it with **ML-KEM-1024** to a fresh **round key**. Until the round closes, the inbox holds only ciphertext, so no reporter can copy another.
+- **A 2-of-3 committee releases the round key** when the round closes. Reporters never control the reveal, so they cannot withhold a value after seeing the others.
+- **The sequencer** decrypts the round, checks every signature, takes the **median** and posts an **ML-DSA-87 signed batch** to QoreChain.
+- **AuguryHub**, an EVM contract on QoreChain, verifies each batch with the `pqcVerify` and `pqcKeyStatus` precompiles before any application can read the price.
+- **A watchtower** re-checks every round. A wrong median is proven on-chain in **one step** and the sequencer's bond is slashed.
+- **Reporters withdraw** stake and rewards to L1 with a verified settlement receipt.
+- **Private feeds** (for example a tokenized fund's NAV) are sealed to paying subscribers with **QoreSeal epoch keys**.
+
+## How a round works
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant R as Reporters (staked)
+    participant I as Rollup inbox (L1)
+    participant C as Key committee (2-of-3)
+    participant S as Sequencer
+    participant H as AuguryHub (EVM)
+    participant W as Watchtower
+    participant A as Consumer app
+
+    S->>I: Open round N, publish ML-KEM round public key
+    R->>R: Fetch price, sign with ML-DSA-87
+    R->>I: Post sealed report (ciphertext only)
+    Note over I: Round closes at a fixed block height
+    C->>I: Release round key shares
+    S->>S: Rebuild key, decrypt, verify signatures, take median
+    S->>H: Post ML-DSA-87 signed batch (price, round, report root)
+    H->>H: pqcKeyStatus + pqcVerify, store price
+    A->>H: getPrice(feed)
+    W->>I: Replay round from inbox data
+    alt Batch is wrong
+        W->>H: One-step fraud proof
+        H->>H: Recompute median, slash sequencer bond
+    end
+```
+
+1. **Open.** The sequencer opens round *N* and publishes the round's ML-KEM-1024 public key. The matching secret key is split into shares held by the key committee.
+2. **Report.** Each reporter fetches the price from its own sources, signs `(feed, round, price, timestamp)` with its registered ML-DSA-87 key, seals the signed report to the round key and posts it to the rollup inbox. The order of the inbox is fixed by QoreChain.
+3. **Close.** At a fixed block height the round closes. Reports posted later are ignored.
+4. **Release.** Two of the three committee members publish their shares, and anyone can rebuild the round's secret key.
+5. **Aggregate.** The sequencer decrypts every report, drops invalid ones (bad signature, unregistered key, wrong round, duplicate), takes the median and posts a batch signed with ML-DSA-87.
+6. **Settle.** AuguryHub checks the sequencer's key with `pqcKeyStatus`, verifies the batch with `pqcVerify` and stores the price with its round number and time.
+7. **Watch.** The watchtower replays the round from inbox data. If the batch is wrong, it submits a fraud proof.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Off-chain
+        RN[Reporter nodes]
+        KC[Key committee]
+        SQ[Sequencer]
+        WT[Watchtower]
+        DB[Dashboard]
+    end
+    subgraph QoreChain diana
+        IN[Rollup inbox - RDK]
+        HUB[AuguryHub - EVM]
+        REG[Key registries - ML-DSA and ML-KEM]
+        AMM[AMM pools]
+        APP[Consumer contracts]
+    end
+    RN -- sealed signed reports --> IN
+    AMM -- QOR TWAP --> RN
+    KC -- round key shares --> IN
+    IN --> SQ
+    SQ -- signed batch --> HUB
+    HUB -- pqcKeyStatus / pqcVerify --> REG
+    APP -- getPrice --> HUB
+    IN --> WT
+    WT -- fraud proof --> HUB
+    HUB --> DB
+```
+
+| Component | Role | Built with |
+|---|---|---|
+| **AuguryHub** | Stores signed batches, holds stakes and bonds, runs fraud proofs, pays withdrawals, serves prices | Solidity, Foundry |
+| **Rollup** | Ordered inbox for sealed reports and key shares, batch anchors, settlement receipts | QoreChain RDK |
+| **Reporter node** | Fetches prices, signs, seals, posts | TypeScript, `@qorechain/pqc`, QoreSeal, QoreChain SDK |
+| **Key committee** | Holds and releases round key shares | TypeScript, `@qorechain/pqc` |
+| **Sequencer** | Decrypts, validates, aggregates, posts signed batches | TypeScript, RDK, QoreChain SDK |
+| **Watchtower** | Replays rounds and submits fraud proofs | TypeScript, QoreChain MCP server, SDK |
+| **Dashboard** | Live feeds, rounds, receipts, slashing events, a demo consumer | React, QoreX integrations |
+
+**A note on the RDK.** The RDK's built-in execution (`qledger-v1`) handles payments. Augury's state is prices, so aggregation runs in our sequencer, the inbox carries the sealed reports, and correctness is enforced by AuguryHub's fraud proof rather than by the RDK's payment execution.
+
+## Cryptographic design
+
+| Purpose | Algorithm | Why |
+|---|---|---|
+| Reporter signatures | ML-DSA-87 (FIPS 204) | A forged report must be impossible even with a quantum computer |
+| Batch signatures | ML-DSA-87 | The sequencer's batches are what applications trust |
+| Report sealing | ML-KEM-1024 (FIPS 203), via QoreSeal | Reports stay hidden until the round closes, which prevents copying |
+| Private feeds | QoreSeal epoch keys (ML-KEM-1024) | Only current subscribers can read; a lapsed subscriber is rotated out |
+| Hashing | SHAKE-256 | Report roots and commitments |
+| Transactions | Hybrid secp256k1 + ML-DSA-87 | QoreChain's post-quantum transaction format |
+
+**Keys are registered on-chain with proof of possession.** AuguryHub refuses reports and batches signed by keys that `pqcKeyStatus` does not show as registered.
+
+**Domain separation.** Every signed message includes the chain ID, the AuguryHub address, the feed ID and the round number, so a signature cannot be replayed in another round, feed or deployment.
+
+### Why seal to a round key instead of commit-reveal
+
+| | Commit-reveal | Augury (sealed to the round key) |
+|---|---|---|
+| Transactions per reporter per round | 2 | 1 |
+| Can a reporter copy others? | No | No |
+| Can a reporter refuse to reveal after seeing others? | **Yes** | **No.** The committee reveals, not the reporter |
+| Leftover trust | None | The key committee (see [Security model](#security-model)) |
+
+## The watchtower and fraud proofs
+
+A median of a handful of reports is cheap to recompute on-chain, so Augury needs no multi-round challenge game. A **one-step fraud proof** is enough:
+
+1. The watchtower submits the round's signed reports and the released key shares.
+2. AuguryHub checks each report's ML-DSA-87 signature with `pqcVerify` and checks that each report is in the batch's report root.
+3. AuguryHub recomputes the median.
+4. If it differs from the posted price, the batch is reverted and the **sequencer's bond is slashed**. Part of the bond goes to the watchtower.
+
+The watchtower also catches:
+
+| Fault | Evidence | Outcome |
+|---|---|---|
+| Wrong median | Signed reports + key shares | Sequencer bond slashed |
+| Reporter equivocation (two signed prices in one round) | Both signed reports | Reporter stake slashed |
+| Omitted reports | Inbox position of a valid report missing from the batch | Sequencer bond slashed |
+| Late key release | Round close height vs. share posting height | Committee member penalised |
+| Stalled batches | No batch within the deadline | Alert; standby sequencer may take over |
+
+## Staking, rewards and withdrawal
+
+- **Reporters** stake test tokens to join a feed and are rewarded per round from consumer fees.
+- **The sequencer** posts a bond that fraud proofs can slash.
+- **Withdrawals** are claimed on L1 against a verified settlement receipt. Stake is locked for a cooldown after a reporter's last round, so a reporter cannot misbehave and exit before being challenged.
+
+## Private feeds
+
+Some data must not be public: the daily NAV of a tokenized fund, a credit score, a proprietary index. Augury can run a feed whose aggregated values are sealed with **QoreSeal epoch keys** to the current subscriber group:
+
+- Only paying subscribers can decrypt the value.
+- When a subscription lapses, the epoch key rotates and the former subscriber cannot read new values.
+- AuguryHub stores a commitment to each value, so a subscriber can prove to a contract that the value they used is the one Augury published.
+
+## Using Augury from a contract
+
+Planned interface (subject to change while we build):
+
+```solidity
+interface IAugury {
+    /// Latest settled price for a feed, with its round and settlement time.
+    function getPrice(bytes32 feedId)
+        external
+        view
+        returns (int256 price, uint8 decimals, uint64 round, uint64 settledAt);
+}
+
+contract Example {
+    IAugury public immutable augury;
+    bytes32 public constant FBTC_USD = keccak256("fBTC/USD");
+
+    constructor(IAugury _augury) { augury = _augury; }
+
+    function btcPrice() external view returns (int256) {
+        (int256 price,, , uint64 settledAt) = augury.getPrice(FBTC_USD);
+        require(block.timestamp - settledAt < 10 minutes, "stale price");
+        return price;
+    }
+}
+```
+
+**Feeds at launch:** fBTC/USD and fETH/USD from independent exchange sources fetched by each reporter, and QOR/USD from a time-weighted average of QoreChain's AMM pools.
+
+## Protocol Builders requirements
+
+| Requirement | How Augury meets it | Evidence |
+|---|---|---|
+| ML-DSA-signed batches | Every aggregated batch is signed with ML-DSA-87 and verified by AuguryHub | `EVIDENCE.md` (pending) |
+| Withdrawal | Reporter stakes and rewards are withdrawn to L1 | `EVIDENCE.md` (pending) |
+| Verified settlement receipt | Checked in the CLI, the browser and Solidity | `EVIDENCE.md` (pending) |
+| Watchtower | One-step fraud proof plus equivocation, omission and late-release checks | `EVIDENCE.md` (pending) |
+| ML-KEM data protection | Sealed reports and private feeds | `EVIDENCE.md` (pending) |
+| Threat model | [`THREAT_MODEL.md`](THREAT_MODEL.md) | (pending) |
+
+## QoreChain kits and network features
+
+**Kits:** QoreChain SDK, `qorechain-pqc`, QoreSeal, RDK (library and CLI), QoreX integrations, MCP server and `qore` CLI, QoreScan.
+
+**Network features:** hybrid ML-DSA-87 transactions, PQC key registration with proof of possession, scoped EVM windows, Solidity PQC signature check (`pqcVerify`), Solidity PQC key status (`pqcKeyStatus`), QoreSeal and the encryption key registry, RDK rollup, AMM pools, test tokens fUSD / fETH / fBTC, MCP server, QoreScan.
+
+## Security model
+
+The full analysis will live in [`THREAT_MODEL.md`](THREAT_MODEL.md). In short:
+
+**What Augury protects against**
+- Forged reports or batches, including by an attacker with a quantum computer (ML-DSA-87 everywhere, no `ecrecover`).
+- Reporters copying each other (sealed reports).
+- Reporters withholding a value after seeing others (the committee reveals).
+- A sequencer posting a wrong price or dropping reports (one-step fraud proof, bond slashing).
+- Reporters signing two prices in one round (equivocation slashing).
+- Harvest-now-decrypt-later attacks on private feeds (ML-KEM-1024).
+
+**What it does not protect against, and our assumptions**
+- **Committee trust.** If two of the three committee members collude with a reporter, they can reveal reports early. Mitigation: committee members are staked and independent; later versions can use a larger threshold or time-lock encryption.
+- **Majority manipulation.** If more than half of the reporters in a round lie together, the median moves. The median tolerates a minority of bad reporters, not a majority.
+- **Source manipulation.** If the underlying markets are manipulated, honest reporters faithfully report the manipulated price.
+- **Liveness.** If too few committee members are online, a round cannot close. The round is skipped and consumers see a stale timestamp.
+- **Testnet only.** Augury runs on `qorechain-diana` and is not audited.
+
+## Repository layout
+
+Planned:
+
+```
+augury/
+├── contracts/          AuguryHub, consumer interface, Foundry tests
+├── packages/
+│   ├── reporter/       Reporter node
+│   ├── committee/      Round key shares
+│   ├── sequencer/      Aggregation and batch posting
+│   ├── watchtower/     Replay and fraud proofs
+│   └── shared/         Message formats, encoding, crypto helpers
+├── apps/
+│   └── dashboard/      React dashboard and demo consumer
+├── docs/
+├── EVIDENCE.md         Transaction hashes for every claim
+├── THREAT_MODEL.md
+├── AI_USAGE.md
+└── LICENSE
+```
+
+## Getting started
+
+Setup instructions will be added as the packages land. You will need:
+
+- Node.js and a package manager
+- [Foundry](https://book.getfoundry.sh/) for the contracts
+- A QoreX wallet on the `qorechain-diana` testnet (EVM chain ID 9800) with test QOR from the faucet
+
+## Roadmap
+
+- [ ] AuguryHub: batch verification, stakes, bond, getPrice, Foundry tests
+- [ ] Rollup created with the RDK; sealed reports posted to the inbox
+- [ ] Reporter node with fBTC, fETH and QOR (AMM TWAP) feeds
+- [ ] Key committee with 2-of-3 round key release
+- [ ] Sequencer: decrypt, validate, median, signed batch
+- [ ] Watchtower: one-step fraud proof, equivocation, omission and late-release checks
+- [ ] Withdrawals with verified settlement receipts
+- [ ] Private feeds with QoreSeal epoch keys
+- [ ] Dashboard and demo consumer
+- [ ] Live fraud drill on testnet with a slashed bond
+- [ ] `EVIDENCE.md`, `THREAT_MODEL.md`, QoreScan in CI, demo video
+
+## Credits
+
+Built on the official QoreChain kits: the QoreChain SDK, `qorechain-pqc`, QoreSeal, the RDK, the QoreX integrations, the QoreChain MCP server and QoreScan. Every other open-source library we use will be credited here.
+
+See [`AI_USAGE.md`](AI_USAGE.md) for how we use AI tools in this project.
+
+## License
+
+[MIT](LICENSE)
