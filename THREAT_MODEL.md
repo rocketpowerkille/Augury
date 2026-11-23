@@ -56,7 +56,7 @@
 3. **Two colluding committee members can open reports early** and leak them to a reporter. A larger threshold or time-lock encryption would reduce this.
 4. **The member who deals a round's seed knows it alone.** The planned design rotates the dealer each round, so the 2-of-3 guarantee holds against the other members, not against that round's dealer. Removing the dealer needs distributed key generation for ML-KEM, which is open work for our PQC member.
 5. **Challenger rewards are pushed.** A contract that cannot receive QOR cannot collect a challenger reward, so its challenge reverts. Anyone else can still challenge. Pull-based rewards would remove this.
-6. **The ML-DSA-87 algorithm id** returned by `pqcKeyStatus` is a deploy-time parameter. Its value on `qorechain-diana` must be confirmed before deployment.
+6. **The ML-DSA-87 algorithm id** returned by `pqcKeyStatus` is a deploy-time parameter. The official SDK defines it as 1 (`AlgorithmDilithium5`); we will confirm it against a registered key on `qorechain-diana` when we register ours.
 7. **`getPrice` is optimistic.** It returns batches still inside their challenge window. Consumers that need certainty must use `getFinalPrice`.
 8. **A majority of dishonest reporters moves the median.** The median tolerates a minority of bad reporters, not a majority.
 9. **Manipulated source markets** are reported faithfully by honest reporters.

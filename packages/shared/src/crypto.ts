@@ -26,6 +26,12 @@ import {
  * Security-relevant: changes here need review by the team's PQC/security member.
  */
 
+/**
+ * Algorithm id pqcKeyStatus reports for ML-DSA-87 keys: `AlgorithmDilithium5 = 1` in
+ * @qorechain/sdk 0.14.0. Pass it to AuguryHub's constructor as `mldsaAlgorithmId`.
+ */
+export const ML_DSA_87_ALGORITHM_ID = 1;
+
 export const ML_DSA_87_SIGNATURE_LENGTH = 4627;
 export const ML_DSA_87_PUBLIC_KEY_LENGTH = 2592;
 

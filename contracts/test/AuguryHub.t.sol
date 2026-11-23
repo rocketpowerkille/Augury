@@ -11,7 +11,8 @@ contract AuguryHubTest is Test {
     // Same domain as packages/shared/test/messages.test.ts, so the bytes can be compared.
     address constant HUB_ADDRESS = 0x1111111111111111111111111111111111111111;
     uint256 constant CHAIN_ID = 9800;
-    uint8 constant ALG = 3;
+    // ML-DSA-87 (AlgorithmDilithium5) in @qorechain/sdk 0.14.0.
+    uint8 constant ALG = 1;
 
     bytes32 constant FEED = 0x4bb79407dfad9e433ad54bfd5353fe075f319ef31887ca79b4b5b54a584bb1ad;
     uint64 constant WINDOW = 1 hours;
