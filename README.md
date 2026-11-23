@@ -63,7 +63,8 @@ sequenceDiagram
     participant W as Watchtower
     participant A as Consumer app
 
-    S->>I: Open round N, publish ML-KEM round public key
+    C->>I: Dealer opens round N: round public key + share commitments
+    C->>C: Dealer seals each member's share to that member
     R->>R: Fetch price, sign with ML-DSA-87
     R->>I: Post sealed report (ciphertext only)
     Note over I: Round closes at a fixed block height
@@ -79,7 +80,7 @@ sequenceDiagram
     end
 ```
 
-1. **Open.** The sequencer opens round *N* and publishes the round's ML-KEM-1024 public key. The matching secret key is split into shares held by the key committee.
+1. **Open.** The round's dealer, a committee member that rotates every round, creates a fresh seed and publishes the round's ML-KEM-1024 public key with SHA-256 commitments to three seed parts. Each other member receives its two parts sealed with QoreSeal to its own key.
 2. **Report.** Each reporter fetches the price from its own sources, signs `(feed, round, price, timestamp)` with its registered ML-DSA-87 key, seals the signed report to the round key and posts it to the rollup inbox. The order of the inbox is fixed by QoreChain.
 3. **Close.** At a fixed block height the round closes. Reports posted later are ignored.
 4. **Release.** Two of the three committee members publish their shares, and anyone can rebuild the round's secret key.
@@ -255,21 +256,23 @@ The full analysis will live in [`THREAT_MODEL.md`](THREAT_MODEL.md). In short:
 
 ## Repository layout
 
-Planned:
-
 ```
 augury/
-├── contracts/          AuguryHub, consumer interface, Foundry tests
+├── contracts/              Foundry project
+│   ├── src/AuguryHub.sol   Settlement, staking, fraud proofs, price reads
+│   ├── src/libraries/      Fail-closed wrappers for the PQC precompiles
+│   └── test/               Foundry tests and a mock precompile
 ├── packages/
-│   ├── reporter/       Reporter node
-│   ├── committee/      Round key shares
-│   ├── sequencer/      Aggregation and batch posting
-│   ├── watchtower/     Replay and fraud proofs
-│   └── shared/         Message formats, encoding, crypto helpers
-├── apps/
-│   └── dashboard/      React dashboard and demo consumer
-├── docs/
-├── EVIDENCE.md         Transaction hashes for every claim
+│   ├── shared/             Message encoding, report root, median, ML-DSA-87 signing,
+│   │                       QoreSeal sealing, round-seed sharing, inbox posts and the
+│   │                       canonical round processor
+│   ├── committee/          Dealing round keys, sealed share delivery, share release
+│   ├── reporter/           Exchange price sources and sealed report building
+│   ├── sequencer/          Signed batches from the canonical round rules
+│   ├── watchtower/         Batch audits, challenge and equivocation evidence
+│   └── e2e/                A full round across every role
+├── scripts/clean.mjs       Removes everything installed or built locally
+├── EVIDENCE.md             Proof for every claim about the chain
 ├── THREAT_MODEL.md
 ├── AI_USAGE.md
 └── LICENSE
@@ -277,29 +280,46 @@ augury/
 
 ## Getting started
 
-Setup instructions will be added as the packages land. You will need:
+You need Node.js 24, pnpm and [Foundry](https://book.getfoundry.sh/).
 
-- Node.js and a package manager
-- [Foundry](https://book.getfoundry.sh/) for the contracts
-- A QoreX wallet on the `qorechain-diana` testnet (EVM chain ID 9800) with test QOR from the faucet
+```sh
+git clone --recurse-submodules https://github.com/rocketpowerkille/Augury.git
+cd Augury
+pnpm install          # packages stay inside the repo (.pnpm-store/)
+
+pnpm -r typecheck     # TypeScript, strict
+pnpm -r test          # TypeScript tests, real ML-DSA-87 and QoreSeal
+pnpm test:contracts   # Foundry tests
+
+pnpm --filter @augury/shared check:precompile   # read-only check against the testnet precompile
+pnpm clean            # delete node_modules, .pnpm-store and build output
+```
+
+Deploying and running against `qorechain-diana` needs a QoreX wallet with test QOR from the faucet; those steps will be documented once the chain adapters land.
 
 ## Roadmap
 
-- [ ] AuguryHub: batch verification, stakes, bond, getPrice, Foundry tests
-- [ ] Rollup created with the RDK; sealed reports posted to the inbox
-- [ ] Reporter node with fBTC, fETH and QOR (AMM TWAP) feeds
-- [ ] Key committee with 2-of-3 round key release
-- [ ] Sequencer: decrypt, validate, median, signed batch
-- [ ] Watchtower: one-step fraud proof, equivocation, omission and late-release checks
+Done means built and tested locally. Nothing is deployed yet; on-chain proof will appear in [`EVIDENCE.md`](EVIDENCE.md).
+
+- [x] AuguryHub: signed batches, staking, bond, signed exits and withdrawals, one-step fraud proof, equivocation slashing, `getPrice` / `getFinalPrice`, Foundry tests
+- [x] Shared protocol: message encoding byte-matched to Solidity, ML-DSA-87 signing, QoreSeal sealing, 2-of-3 round-seed sharing, canonical round processor
+- [x] Committee, reporter, sequencer and watchtower logic, with an end-to-end round test
+- [x] Read-only check that the testnet `pqcVerify` precompile accepts our signatures
+- [x] CI: contracts and TypeScript on every push
+- [ ] Chain adapters: RDK rollup inbox, AuguryHub calls, settlement receipts
+- [ ] Deployment to `qorechain-diana` and registered PQC keys
+- [ ] QOR/USD feed from a TWAP of QoreChain's AMM pools
 - [ ] Withdrawals with verified settlement receipts
 - [ ] Private feeds with QoreSeal epoch keys
 - [ ] Dashboard and demo consumer
 - [ ] Live fraud drill on testnet with a slashed bond
-- [ ] `EVIDENCE.md`, `THREAT_MODEL.md`, QoreScan in CI, demo video
+- [ ] QoreScan in CI, demo video
 
 ## Credits
 
-Built on the official QoreChain kits: the QoreChain SDK, `qorechain-pqc`, QoreSeal, the RDK, the QoreX integrations, the QoreChain MCP server and QoreScan. Every other open-source library we use will be credited here.
+Built on the official QoreChain kits: `@qorechain/pqc` (ML-DSA-87) and `@qorechain/qoreseal` (ML-KEM-1024 envelopes) today, with the QoreChain SDK, the RDK, the QoreX integrations, the QoreChain MCP server and QoreScan to follow.
+
+Other open-source tools: [Foundry](https://github.com/foundry-rs/foundry) and [forge-std](https://github.com/foundry-rs/forge-std) for the contracts, [TypeScript](https://www.typescriptlang.org/) and [pnpm](https://pnpm.io/).
 
 See [`AI_USAGE.md`](AI_USAGE.md) for how we use AI tools in this project.
 
