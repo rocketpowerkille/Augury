@@ -18,7 +18,13 @@ import type { Network } from "./network.ts";
 
 /** AuguryHub's SignedReport tuple. */
 function reportTuple(r: SignedReport) {
-  return { reporter: r.reporter, price: r.price, observedAt: r.observedAt, signature: bytesToHex(r.signature) };
+  return {
+    reporter: r.reporter,
+    price: r.price,
+    observedAt: r.observedAt,
+    salt: r.salt,
+    signature: bytesToHex(r.signature),
+  };
 }
 
 // ------------------------------------------------------------------------------------------
@@ -169,6 +175,7 @@ export async function postedBatches(client: PublicClient, hub: Hex, fromBlock: b
         reporter: r.reporter.toLowerCase() as Hex,
         price: r.price,
         observedAt: r.observedAt,
+        salt: r.salt,
         signature: hexToBytes(r.signature),
       })),
     });
