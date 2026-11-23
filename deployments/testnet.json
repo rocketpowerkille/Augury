@@ -1,0 +1,13 @@
+{
+  "network": "testnet",
+  "hub": "0x86a901909cad74ee281622243dac06c6c33d6236",
+  "rollupId": "augury-oracle",
+  "committee": [
+    "0x72414e9be0215bf5db2752c773b554dee1ca53ce",
+    "0x1945bef501468a8434378033948625c2988306ee",
+    "0x6af51caa91e340080dd610e037104117386f619d"
+  ],
+  "sequencer": "0x20e69b13d201d618c52b1e803bd6320c51037bba",
+  "minReports": 3,
+  "maxReports": 16
+}
