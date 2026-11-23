@@ -1,3 +1,7 @@
 packages:
   - "packages/*"
   - "apps/*"
+
+# Keep every installed package inside this repository, so `pnpm clean` (or deleting
+# node_modules/ and .pnpm-store/) removes all of it. Nothing goes to the global pnpm store.
+storeDir: .pnpm-store

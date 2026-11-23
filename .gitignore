@@ -1,5 +1,6 @@
-# Dependencies
+# Dependencies (all kept inside the repo, see .npmrc)
 node_modules/
+.pnpm-store/
 
 # Build output
 dist/
