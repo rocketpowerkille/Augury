@@ -31,6 +31,7 @@ export interface ChainView {
 export type RejectReason =
   | "before-open"
   | "late"
+  | "missing-signature"
   | "cannot-open"
   | "wrong-poster"
   | "unknown-key"
@@ -121,6 +122,8 @@ export function processRound(
   const reject = (e: InboxEntry, reason: RejectReason) =>
     rejected.push({ seq: e.seq, poster: e.poster, reason });
 
+  const bySeq = new Map(forRound.map((x) => [x.seq, x]));
+
   for (const e of forRound) {
     if (e.post.kind !== "report") continue;
     if (e.seq < openEntry.seq) {
@@ -131,16 +134,25 @@ export function processRound(
       reject(e, "late");
       continue;
     }
+    // The signature is the very next inbox entry, from the same poster (same transaction).
+    const next = bySeq.get(e.seq + 1n);
+    if (!next || next.post.kind !== "signature" || !same(next.poster, e.poster) || next.height !== e.height) {
+      reject(e, "missing-signature");
+      continue;
+    }
     let report: SignedReport;
     try {
-      report = openReport({
-        sealChainId: cfg.sealChainId,
-        domain: cfg.domain,
-        keys,
-        envelope: hexToBytes(e.post.envelope),
-        feedId,
-        round,
-      });
+      report = {
+        ...openReport({
+          sealChainId: cfg.sealChainId,
+          domain: cfg.domain,
+          keys,
+          envelope: hexToBytes(e.post.envelope),
+          feedId,
+          round,
+        }),
+        signature: hexToBytes(next.post.signature),
+      };
     } catch {
       reject(e, "cannot-open");
       continue;

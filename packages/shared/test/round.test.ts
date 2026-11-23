@@ -6,6 +6,7 @@ import {
   FEEDS,
   generateSigningKey,
   median,
+  newSalt,
   postFromShare,
   processRound,
   reportRoot,
@@ -78,10 +79,19 @@ class Inbox {
     return this;
   }
 
+  /** A report: the sealed message, then (unless `noSignature`) its signature right after. */
   report(
     r: Reporter,
     price: bigint,
-    opts: { height?: bigint; poster?: Hex; signer?: SigningKey; observedAt?: bigint } = {},
+    opts: {
+      height?: bigint;
+      poster?: Hex;
+      signer?: SigningKey;
+      observedAt?: bigint;
+      noSignature?: boolean;
+      salt?: Hex;
+      signatureHeight?: bigint;
+    } = {},
   ) {
     const signed = signReport((opts.signer ?? r.key).secretKey, cfg.domain, {
       feedId: FEED,
@@ -89,6 +99,7 @@ class Inbox {
       reporter: r.address,
       price,
       observedAt: opts.observedAt ?? 1764000000n,
+      salt: opts.salt ?? newSalt(),
     });
     const envelope = sealReport({
       sealChainId: cfg.sealChainId,
@@ -96,12 +107,17 @@ class Inbox {
       recipient: { mlkemPublicKey: this.keys.mlkemPublicKey, x25519PublicKey: this.keys.x25519PublicKey },
       report: signed,
     });
-    this.add(opts.poster ?? r.address, opts.height ?? 50n, {
-      kind: "report",
-      feedId: FEED,
-      round: ROUND,
-      envelope: bytesToHex(envelope),
-    });
+    const poster = opts.poster ?? r.address;
+    const height = opts.height ?? 50n;
+    this.add(poster, height, { kind: "report", feedId: FEED, round: ROUND, envelope: bytesToHex(envelope) });
+    if (!opts.noSignature) {
+      this.add(poster, opts.signatureHeight ?? height, {
+        kind: "signature",
+        feedId: FEED,
+        round: ROUND,
+        signature: bytesToHex(signed.signature),
+      });
+    }
     return this;
   }
 
@@ -169,6 +185,19 @@ describe("processRound", () => {
     assert.deepEqual(out.rejected.map((r) => r.reason), ["late"]);
   });
 
+  it("rejects a sealed report without its signature right after it", () => {
+    const out = fullRound().report(reporters[5]!, 1n, { noSignature: true }).share(0).share(1).run();
+    assert.ok(out.status === "ready");
+    assert.deepEqual(out.rejected.map((r) => r.reason), ["missing-signature"]);
+    assert.equal(out.header.reportCount, 5);
+  });
+
+  it("rejects a signature posted in a later block than its report", () => {
+    const out = fullRound().report(reporters[5]!, 1n, { signatureHeight: 51n }).share(0).share(1).run();
+    assert.ok(out.status === "ready");
+    assert.deepEqual(out.rejected.map((r) => r.reason), ["missing-signature"]);
+  });
+
   it("rejects a report posted by someone other than its reporter", () => {
     const out = fullRound().report(reporters[5]!, 1n, { poster: reporters[0]!.address }).share(0).share(1).run();
     assert.ok(out.status === "ready");
@@ -189,11 +218,21 @@ describe("processRound", () => {
   });
 
   it("keeps one copy of an identical duplicate", () => {
-    const out = fullRound().report(reporters[0]!, prices[0]!).share(0).share(1).run();
+    const salt = newSalt();
+    const inbox = new Inbox().open().report(reporters[0]!, prices[0]!, { salt });
+    prices.slice(1).forEach((p, i) => inbox.report(reporters[i + 1]!, p));
+    const out = inbox.report(reporters[0]!, prices[0]!, { salt }).share(0).share(1).run();
     assert.ok(out.status === "ready");
     assert.deepEqual(out.rejected.map((r) => r.reason), ["duplicate"]);
     assert.equal(out.equivocations.length, 0);
     assert.equal(out.header.reportCount, 5);
+  });
+
+  it("treats the same price under another salt as equivocation", () => {
+    const out = fullRound().report(reporters[0]!, prices[0]!).share(0).share(1).run();
+    assert.ok(out.status === "ready");
+    assert.equal(out.equivocations.length, 1);
+    assert.equal(out.header.reportCount, 4);
   });
 
   it("drops an equivocating reporter and records the evidence", () => {
