@@ -1,0 +1,18 @@
+{
+  "name": "@augury/sequencer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Augury sequencer: aggregate a round into an ML-DSA-87 signed batch",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@augury/shared": "workspace:*"
+  }
+}
