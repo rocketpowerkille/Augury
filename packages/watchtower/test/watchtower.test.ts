@@ -37,6 +37,8 @@ function signed(i: number, price = reporters[i]!.price): SignedReport {
     reporter: r.address,
     price,
     observedAt: 1764000000n,
+    // Fixed per reporter, so signing the same report twice gives the same bytes.
+    salt: `0x${(i + 1).toString(16).padStart(2, "0").repeat(32)}`,
   });
 }
 

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { acceptDelivery, dealRound, releaseShare } from "@augury/committee";
-import { buildReportPost } from "@augury/reporter";
+import { buildReportPosts } from "@augury/reporter";
 import { buildBatch } from "@augury/sequencer";
 import {
   FEEDS,
   generateSigningKey,
   median,
+  newSalt,
   signReport,
   verifyBatch,
   bytesToHex,
@@ -70,21 +71,18 @@ function playRound(): InboxEntry[] {
     );
   }
 
-  // 2. Reporters seal their observations to the round key.
+  // 2. Reporters post their sealed observation and its signature, back to back (one tx).
   for (const r of reporters) {
-    post(
-      r.address,
-      50n,
-      buildReportPost({
-        domain: cfg.domain,
-        sealChainId: cfg.sealChainId,
-        reporter: r.address,
-        secretKey: r.key.secretKey,
-        open: deal.open,
-        price: r.price,
-        observedAt: 1764000000n,
-      }),
-    );
+    const posts = buildReportPosts({
+      domain: cfg.domain,
+      sealChainId: cfg.sealChainId,
+      reporter: r.address,
+      secretKey: r.key.secretKey,
+      open: deal.open,
+      price: r.price,
+      observedAt: 1764000000n,
+    });
+    for (const p of posts) post(r.address, 50n, p);
   }
 
   // 3. After the close, two members release their shares.
@@ -141,6 +139,7 @@ describe("a full Augury round", () => {
       reporter: r.address,
       price: 1n,
       observedAt: 1764000001n,
+      salt: newSalt(),
     });
     const reports = [smuggled, ...batch.reports.slice(1)];
     const header = { ...batch.header, price: median(reports.map((x) => x.price)), reportCount: reports.length };
