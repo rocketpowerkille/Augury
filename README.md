@@ -332,7 +332,7 @@ Every EVM call to the hub goes through an EVM window that the account opens with
 
 ## Roadmap
 
-Done means built and tested locally. Nothing is deployed yet; on-chain proof will appear in [`EVIDENCE.md`](EVIDENCE.md).
+Done means built and tested; everything marked on chain has transaction hashes in [`EVIDENCE.md`](EVIDENCE.md).
 
 - [x] AuguryHub: signed batches, staking, bond, signed exits and withdrawals, one-step fraud proof, equivocation slashing, `getPrice` / `getFinalPrice`, Foundry tests
 - [x] Shared protocol: message encoding byte-matched to Solidity, ML-DSA-87 signing, QoreSeal sealing, 2-of-3 round-seed sharing, canonical round processor
@@ -342,12 +342,12 @@ Done means built and tested locally. Nothing is deployed yet; on-chain proof wil
 - [x] Chain adapters: verified inbox reads (checked live on testnet), inbox posts, AuguryHub calls through hub-scoped EVM windows, KEM registry, PQC key registration
 - [x] Node: committee, reporter, sequencer and watchtower roles; account, deploy and stake scripts (dry run by default)
 - [ ] Settlement receipts: anchor rollup batches with the creator's ML-DSA-87 key
-- [ ] Deployment to `qorechain-diana` and registered PQC keys
+- [x] Deployment to `qorechain-diana`: rollup `augury-oracle`, AuguryHub, 8 accounts with registered ML-DSA-87 keys (committee ML-KEM keys too), live rounds for fBTC/USD and fETH/USD
 - [ ] QOR/USD feed from a TWAP of QoreChain's AMM pools
 - [ ] Withdrawals with verified settlement receipts
 - [ ] Private feeds with QoreSeal epoch keys
 - [ ] Dashboard and demo consumer
-- [ ] Live fraud drill on testnet with a slashed bond
+- [x] Live fraud drill on testnet: a lying batch challenged by the watchtower and the sequencer's bond slashed
 - [ ] QoreScan in CI, demo video
 
 ## Credits
