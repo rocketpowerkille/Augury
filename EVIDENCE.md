@@ -49,7 +49,7 @@ The sequencer funded the other seven accounts with hybrid-signed bank sends: `2F
 | ML-DSA-signed batches | Round 1 batches on AuguryHub, each verified on chain with `pqcVerify` against the sequencer's registered ML-DSA-87 key: fBTC/USD `0xdf93fb41b93b855593a611c4d856959daff23d55738380aa342d1cc66ca4a222`, fETH/USD `0x4cb985dc84e969c7f246d33ba4c9c84a27bbb71bbe6517f9864a62221195605c` (see "Live rounds") |
 | Withdrawal | Pending: reporter and sequencer withdrawals after the exit delay; rollup withdrawals with settlement receipts |
 | Verified settlement receipt | Pending: anchoring rollup batches with the creator's ML-DSA-87 key |
-| Watchtower | Audited both round 1 batches from their calldata against the rollup inbox: "checks out". A fraud drill is pending |
+| Watchtower | Audited every live batch from its calldata against the rollup inbox ("checks out"), and in the fraud drill proved a lying batch wrong on chain: the batch was invalidated and the sequencer's bond slashed (see "Drills") |
 | ML-KEM data protection | Reports sealed with QoreSeal (ML-KEM-1024 + X25519) to each round's key; share deliveries sealed in ML-KEM-1024 mode to the committee's registered KEM keys (see "Live rounds") |
 | Threat model | [THREAT_MODEL.md](THREAT_MODEL.md) |
 
@@ -72,3 +72,4 @@ The sequencer funded the other seven accounts with hybrid-signed bank sends: `2F
 
 | Date | What we did | Result | Transactions |
 |---|---|---|---|
+| 2026-11-24 | **Fraud drill.** Acting as a dishonest sequencer, `drill.ts` built round 3 of fBTC/USD honestly from the inbox (3 valid reports, median 6,141,687,500,000 = USD 61,416.875), replaced the median with double the value (12,283,375,000,000), signed that header with the sequencer's real ML-DSA-87 key and posted it. The hub accepted it (valid signature). The running watchtower rebuilt the round from the inbox, found `wrong-median`, and submitted the one-step fraud proof (three on-chain ML-DSA-87 verifications plus the median, 677,998 gas). | Batch status Invalid; sequencer bond 10 QOR to 0; 5 QOR paid to the watchtower (balance 9.909 to 14.788 QOR after fees); 5 QOR kept in the hub (`slashedTotal`). Between the post and the challenge, `getPrice` briefly returned the lie while `getFinalPrice` kept returning round 2; after the challenge `getPrice` fell back to round 2 (USD 61,467.89). | Lying batch `0xf411756f0bc0d3c2bb3208428c56ac0f1de2d377bd403c878ab76ea7128e71c1`; challenge `0x620969a68679940e0c8de8b16bf41c7c78444a1c10b914c4d73077ffad846ad1` (block 10,637,254) |
