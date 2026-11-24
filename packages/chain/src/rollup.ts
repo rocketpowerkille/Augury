@@ -1,5 +1,27 @@
 import { createRollupMsg, rollupIdError } from "@qorechain/rdk";
+import { msg } from "@qorechain/sdk";
 import type { NativeMessage } from "./native.ts";
+
+/**
+ * `MsgRegisterSidechain` for a rollup's layer in x/multilayer, where settlement anchors live.
+ * `MsgCreateRollup` normally registers this layer itself (event `sidechain_registered`), but
+ * for Augury's rollup (profile `custom`, vm `custom`) it did not, and anchoring then fails
+ * with "layer not found". The fields copy what the chain registers on its own for other
+ * rollups (e.g. `ledgerpump`).
+ */
+export function registerLayerMessage(creator: string, rollupId: string, profile: string): NativeMessage {
+  return msg.multilayer.registerSidechain({
+    creator,
+    layerId: rollupId,
+    description: `RDK rollup: ${rollupId} (${profile})`,
+    targetBlockTimeMs: "1000",
+    maxTransactionsPerBlock: "10000",
+    minValidators: 1,
+    settlementIntervalBlocks: "100",
+    supportedVmTypes: [],
+    supportedDomains: [],
+  });
+}
 
 /** The chain's minimum stake to create a rollup (live `min_stake_for_rollup`, 10,000 QOR). */
 export const MIN_ROLLUP_STAKE_UQOR = 10_000_000_000n;
