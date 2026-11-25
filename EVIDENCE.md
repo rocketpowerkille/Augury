@@ -1,6 +1,6 @@
 # Evidence
 
-Every claim Augury makes about the `qorechain-diana` testnet is listed here with its proof. Nothing is deployed yet, so the tables are empty. Rows are added only with real transaction hashes and addresses.
+Every claim Augury makes about the `qorechain-diana` testnet is listed here with its proof. Rows are added only with real transaction hashes and addresses.
 
 ## Read-only checks
 
@@ -34,19 +34,28 @@ The sequencer funded the other seven accounts with hybrid-signed bank sends: `2F
 | What | Where | Transaction |
 |---|---|---|
 | Rollup `augury-oracle` (based sequencing, `qledger-v1`, 10,000 QOR stake) | native | `A08941A73C3F11081F2435B6CBF1B135668D65DAF471CEC3CDB251079C4116B4` |
-| **AuguryHub (current, salted reports)** | `0x49bc74d9ad38f805f52984cc2f6d338429b4d3bd` (EVM) | `0xeb5e7f8686557bc8780c8821889c924b59616cac9c79db83800c5a1d0bd27d02` |
-| Sequencer bond, 10 QOR (through a hub-scoped EVM window) | current hub | `0x6fea5145481cdc017bbdb0562157d66864039b4b6d1b33bef23d38f8fd26c872` |
-| Reporter 0 stake, 1 QOR | current hub | `0xfe2a7133235d7e24c4dad1264a5af48d40d1c782b98338a6dbfd0a9ba2045786` |
-| Reporter 1 stake, 1 QOR | current hub | `0xe089cb673f508d471640596d522ba5d5588be68ebf2a1489cb3cd54272075c75` |
-| Reporter 2 stake, 1 QOR | current hub | `0x4074b1c248f3005f21e14bbca961c00c336a08be5f96e2af871185efe6c7729c` |
+| AuguryHub v2 (salted reports; superseded, see below) | `0x49bc74d9ad38f805f52984cc2f6d338429b4d3bd` (EVM) | `0xeb5e7f8686557bc8780c8821889c924b59616cac9c79db83800c5a1d0bd27d02` |
+| Sequencer bond, 10 QOR (through a hub-scoped EVM window) | v2 hub | `0x6fea5145481cdc017bbdb0562157d66864039b4b6d1b33bef23d38f8fd26c872` |
+| Reporter 0 stake, 1 QOR | v2 hub | `0xfe2a7133235d7e24c4dad1264a5af48d40d1c782b98338a6dbfd0a9ba2045786` |
+| Reporter 1 stake, 1 QOR | v2 hub | `0xe089cb673f508d471640596d522ba5d5588be68ebf2a1489cb3cd54272075c75` |
+| Reporter 2 stake, 1 QOR | v2 hub | `0x4074b1c248f3005f21e14bbca961c00c336a08be5f96e2af871185efe6c7729c` |
 
-**Superseded first hub** `0x86a901909cad74ee281622243dac06c6c33d6236` (deploy `0x4ff215ee2a06514998935683275032f9f1d6baf644317aac204e9fbc59d7f08b`, bond `0x506e1c97bc09b28eafbba272095a7e350b78518bd147393911af4222b9c77f86`, stakes `0x3187eb49…`, `0xcb82b86a…`, `0xd80f3cf8…`). Its first live round showed that a qledger-v1 post is limited to 6,144 bytes, while a sealed report carrying its 4,627-byte ML-DSA-87 signature was about 13 KB in the old encoding. Reports are now a sealed message plus a separate signature post, and the signed message carries a sealed random salt so the public signature cannot be used to test guessed prices. That changed the signed format, so the hub was redeployed. Recorded in `deployments/testnet-v1.json`.
+| **AuguryHub v3 (current: pinned reporter keys, post-time activity)** | `0x74a9cf2c448328d0bbde986228c4ca340ff04054` (EVM) | `0xf4ef42cb3a77cee3d9d7062f34609d0d52891224fdc06dbad8ad6359fa0825d2` |
+| Sequencer bond, 10 QOR | v3 hub | `0x6a4f07b00769bc1ea9cbfa983948b5e44f588fd81887e8b81ac0418d9318c816` |
+| Reporter 0 stake, 1 QOR (pins its 2,592-byte ML-DSA-87 key) | v3 hub | `0x36362bc80ed4dcdaf210f94f8944185814148dc2a47100ce69076c48210601b9` |
+| Reporter 1 stake, 1 QOR (pins its key) | v3 hub | `0x9fd613ed9afa90c1eba788dcd52175cfb6f9444beced01c170d2ba6a74a60cc3` |
+| Reporter 2 stake, 1 QOR (pins its key) | v3 hub | `0x8312d7080bc39634aa7f5d3c73a20ce4a6524e30e467ba0bd53ec94ca671b847` |
+| Watchtower sends 5 QOR to the sequencer for the v3 bond (native, hybrid-signed) | native | `F9E3F263031D27B6D5553DD6A32D709099CCBA94148DC2AE3FD0FD5C16321603` |
+
+**Superseded v2 hub** `0x49bc74d9ad38f805f52984cc2f6d338429b4d3bd`, recorded in `deployments/testnet-v2.json`. A security review on 2026-11-26 found that a reporter included in an honest batch could get the sequencer slashed on it, by being slashed for equivocation or rotating its ML-DSA key during the challenge window (T14 and T15 in [THREAT_MODEL.md](THREAT_MODEL.md)). The v3 hub pins each reporter's key at stake time and judges activity by recorded times. `reporterKeys` on the v3 hub returns a 2,592-byte key for each of the three reporters.
+
+**Superseded first hub (v1)** `0x86a901909cad74ee281622243dac06c6c33d6236` (deploy `0x4ff215ee2a06514998935683275032f9f1d6baf644317aac204e9fbc59d7f08b`, bond `0x506e1c97bc09b28eafbba272095a7e350b78518bd147393911af4222b9c77f86`, stakes `0x3187eb49…`, `0xcb82b86a…`, `0xd80f3cf8…`). Its first live round showed that a qledger-v1 post is limited to 6,144 bytes, while a sealed report carrying its 4,627-byte ML-DSA-87 signature was about 13 KB in the old encoding. Reports are now a sealed message plus a separate signature post, and the signed message carries a sealed random salt so the public signature cannot be used to test guessed prices. That changed the signed format, so the hub was redeployed. Recorded in `deployments/testnet-v1.json`.
 
 ## Protocol Builders requirements
 
 | Requirement | Proof |
 |---|---|
-| ML-DSA-signed batches | Round 1 batches on AuguryHub, each verified on chain with `pqcVerify` against the sequencer's registered ML-DSA-87 key: fBTC/USD `0xdf93fb41b93b855593a611c4d856959daff23d55738380aa342d1cc66ca4a222`, fETH/USD `0x4cb985dc84e969c7f246d33ba4c9c84a27bbb71bbe6517f9864a62221195605c` (see "Live rounds") |
+| ML-DSA-signed batches | Latest: v3 hub batches fBTC/USD `0xd95aadf4dbd5c2d3f3cdc6f9787852e3384fe9e3c38c3b742710a6dbb687ecac` and fETH/USD `0xcfd52da90eee8758cbbd08f24551d210ab336e52e172253d2d1265d33901b6d2`. First: round 1 batches on the v2 hub, each verified on chain with `pqcVerify` against the sequencer's registered ML-DSA-87 key: fBTC/USD `0xdf93fb41b93b855593a611c4d856959daff23d55738380aa342d1cc66ca4a222`, fETH/USD `0x4cb985dc84e969c7f246d33ba4c9c84a27bbb71bbe6517f9864a62221195605c` (see "Live rounds") |
 | Withdrawal | Pending: reporter and sequencer withdrawals after the exit delay; rollup withdrawals with settlement receipts |
 | Verified settlement receipt | Pending: anchoring rollup batches with the creator's ML-DSA-87 key |
 | Watchtower | Audited every live batch from its calldata against the rollup inbox ("checks out"), and in the fraud drill proved a lying batch wrong on chain: the batch was invalidated and the sequencer's bond slashed (see "Drills") |
@@ -67,6 +76,17 @@ The sequencer funded the other seven accounts with hybrid-signed bank sends: `2F
 | Watchtower audit | checks out | checks out |
 
 **Round 2** settled the same way a minute later: fBTC/USD 6,146,789,250,000 (USD 61,467.8925), batch `0xa703357071fcdcaf4f0e18d15fe9ffbe61ccc8ac4d5277aec20cdcf92f448ae8`, audited "checks out"; fETH/USD 171,648,250,000 (USD 1,716.4825), batch `0xebe852856818bf797d949dfa4e7a2551d4572901d0dee9489fcb67a6b10783ca`. The roles were stopped during round 3 to save fees. During the run one reporter correctly skipped a round when only one of its three price sources answered, and another retried after a transient network error.
+
+**v3 hub, 2026-11-26 (UTC 2026-11-25 23:22–23:25), hub `0x74a9cf2c448328d0bbde986228c4ca340ff04054`.** All eight roles ran with `pnpm augury <role>`. Round numbers continue the shared rollup inbox, so this is fBTC/USD round 6 and fETH/USD round 4. The sequencer skipped the earlier inbox rounds as `too-few-reports`, because their reports were signed and sealed for the v2 hub's address.
+
+| Step | fBTC/USD round 6 | fETH/USD round 4 |
+|---|---|---|
+| Committee opens the round (closes at height 10,755,327) | `0D7428E4E480C252AD469AE7F6F14C71B65D63E5B5D86BD7ECC8AEE61BE58410` | `9A35180713952B9F2E64C793073B15CB0224263B2D45B9020A0807FCF5AC9D62` |
+| Reporters post sealed report + signature | `8ECE20904B5DEDD3EDC7CD825EE476EA985A0BC1662312FBF9118B839D2A29F7`, `24ACCD80FC2AE9D285A7F5D5C5375607D8E4EF492AEC476EF0724B736D8115BC`, `FB632C4592AE49492D0100AC2F2C76CFDA590847F8E79B33989C80BDFAA88F04` | `612EF63F09F99E99450DB6BED4AD0D97C7FD74DAAEA090F20FF9DD3A3BD5A5F3`, `AAC970509E41A09E4EAF70947344020F4A0CEF4395F632D723EC31100BA9324D`, `0A22FD6CC1F1DEDDCAA18D098F2EA529CDD2A01A0B86F9DD6AB5DE0FDCD42C8F` |
+| Committee members release shares after the close | `60E5B5AB9958E21B625F6228F62285A06A5430C60A9AB26F765D987220DEA33B`, `291B0FE8E0BDAD9D5A1A4C0282E8C5EE822E79E53798E3586B78684F207FFB85`, `36643B9BC42E4A1559C4F2D655D9F160CFA4FB8C3D8C7CE23551802EA9B755A3` | `9D990EAEF8598E0EE52DECC0983BF0F261279FD01E440EA0E150763E07BF9DAC`, `CA51A91F8C88A955F8E7702210ED31C886B2379BF7EC373BE9B9F95ECA63D403`, `3FA2A5BC8FF7686E3363EA484A8FC19EC84D0721A1FAC0487CA3A89F3F8AC1BC` |
+| Sequencer posts the ML-DSA-87 signed median (block, gas) | `0xd95aadf4dbd5c2d3f3cdc6f9787852e3384fe9e3c38c3b742710a6dbb687ecac` (10,755,344; 547,673 gas) | `0xcfd52da90eee8758cbbd08f24551d210ab336e52e172253d2d1265d33901b6d2` (10,755,354; 547,493 gas) |
+| Settled price read with `getPrice` | 6,017,810,000,000 (USD 60,178.10), 3 reports | 168,825,000,000 (USD 1,688.25), 3 reports |
+| Watchtower audit | checks out | checks out |
 
 ## Drills
 
