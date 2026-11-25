@@ -59,7 +59,7 @@ The sequencer funded the other seven accounts with hybrid-signed bank sends: `2F
 | Withdrawal | Pending: reporter and sequencer withdrawals after the exit delay; rollup withdrawals with settlement receipts |
 | Verified settlement receipt | Pending: anchoring rollup batches with the creator's ML-DSA-87 key |
 | Watchtower | Audited every live batch from its calldata against the rollup inbox ("checks out"), and in the fraud drill proved a lying batch wrong on chain: the batch was invalidated and the sequencer's bond slashed (see "Drills") |
-| ML-KEM data protection | Reports sealed with QoreSeal (ML-KEM-1024 + X25519) to each round's key; share deliveries sealed in ML-KEM-1024 mode to the committee's registered KEM keys (see "Live rounds") |
+| ML-KEM data protection | Reports sealed with QoreSeal (ML-KEM-1024 + X25519) to each round's key; share deliveries sealed in ML-KEM-1024 mode to the committee's registered KEM keys (see "Live rounds"); a private feed whose epoch key is sealed to subscribers' registered ML-KEM-1024 keys and rotated when a subscriber is removed, who then cannot read the next value (see "Private feeds") |
 | Threat model | [THREAT_MODEL.md](THREAT_MODEL.md) |
 
 ## Live rounds
@@ -87,6 +87,25 @@ The sequencer funded the other seven accounts with hybrid-signed bank sends: `2F
 | Sequencer posts the ML-DSA-87 signed median (block, gas) | `0xd95aadf4dbd5c2d3f3cdc6f9787852e3384fe9e3c38c3b742710a6dbb687ecac` (10,755,344; 547,673 gas) | `0xcfd52da90eee8758cbbd08f24551d210ab336e52e172253d2d1265d33901b6d2` (10,755,354; 547,493 gas) |
 | Settled price read with `getPrice` | 6,017,810,000,000 (USD 60,178.10), 3 reports | 168,825,000,000 (USD 1,688.25), 3 reports |
 | Watchtower audit | checks out | checks out |
+
+## Private feeds
+
+**2026-11-26, PrivateFeeds `0x298bccca3fc740a5a80ffb8bfbf4a7f7b716adf1`, feed `NAV/demo-fund` (`0xc617c2c2b69484e58e7a6fc23d8f665ad507bea6f12e9c0a8e385aed8b203c36`).** Run with `packages/node/scripts/private-feed.ts`. The publisher is the sequencer account; the subscribers are committee members 0 and 1, known only by the ML-KEM-1024 keys they published in the chain's KEM registry. The values are demo numbers, not a real fund's NAV.
+
+| Step | Transaction |
+|---|---|
+| Deploy PrivateFeeds | `0xae39461c86fe5754211b41e10f0829c59c8227a567f45fa4afa3070a55ded0da` |
+| Round 1: epoch 3 key (sealed to both subscribers) and the sealed value posted to the rollup inbox | `6566BE8BF18E6D5060EBE3D059021D0DAA43C38E3E85B3E1735D6C4BA09CC1C3` |
+| Round 1: commitment `0xa18474aba676f98c67a18fc956762aac6341c554b72b40df74a4fcc84e7ceda2` published, ML-DSA-87 signature checked with `pqcVerify` | `0xe3ac90d3080407d5cc2ca4085942946fc56c1bf510acfbf5392821f88d24f5fb` |
+| Committee member 1 removed; round 2: epoch 4 key (sealed to member 0 only) and the sealed value posted | `AEA7E39089ABF5AF2BC6B7782F213E861C0F344EAFCF6D80BE4A472C8B957A1A` |
+| Round 2: commitment `0xd93bd2925299185550e60efdd6f872808db5d0106f218dd16c39a3b818a3fc13` published | `0x4cc0deb2b3eb433c77cac672de97ff554a794428520ff04dac200ce28aabfa0c` |
+
+Reading the posts back from the chain's inbox and opening them with each subscriber's own key:
+
+| Subscriber | Round 1 (USD 104.25) | Round 2 (USD 104.26) |
+|---|---|---|
+| Committee member 0 `0x72414e9be0215bf5db2752c773b554dee1ca53ce` | read; `verifyValue` on chain = true | read; `verifyValue` on chain = true |
+| Committee member 1 `0x1945bef501468a8434378033948625c2988306ee` (removed before round 2) | read; `verifyValue` on chain = true | cannot read: no key for epoch 4 |
 
 ## Drills
 

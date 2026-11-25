@@ -346,7 +346,7 @@ Done means built and tested; everything marked on chain has transaction hashes i
 - [x] Deployment to `qorechain-diana`: rollup `augury-oracle`, AuguryHub, 8 accounts with registered ML-DSA-87 keys (committee ML-KEM keys too), live rounds for fBTC/USD and fETH/USD
 - [ ] QOR/USD feed from a TWAP of QoreChain's AMM pools
 - [ ] Withdrawals with verified settlement receipts
-- [ ] Private feeds with QoreSeal epoch keys
+- [x] Private feeds with QoreSeal epoch keys: `PrivateFeeds` contract, live on testnet with a subscriber rotated out
 - [ ] Dashboard and demo consumer
 - [x] Live fraud drill on testnet: a lying batch challenged by the watchtower and the sequencer's bond slashed
 - [ ] QoreScan in CI, demo video
