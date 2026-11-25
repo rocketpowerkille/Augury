@@ -21,6 +21,8 @@ export interface BuildReportArgs {
   /** The reporter's ML-DSA-87 secret key (the one registered on chain). */
   secretKey: Uint8Array;
   open: RoundOpen;
+  /** The layer 1 open of a two-dealer round; the report is sealed to its key as well. */
+  outer?: RoundOpen;
   /** Price with 8 decimals. */
   price: bigint;
   /** Unix seconds when the price was observed. */
@@ -36,6 +38,7 @@ export interface BuildReportArgs {
  */
 export function buildReportPosts(args: BuildReportArgs): [SealedReportPost, SignaturePost] {
   if (args.price <= 0n) throw new Error("price must be positive");
+  if ((args.open.layers ?? 1) === 2 && !args.outer) throw new Error("a two-dealer round needs its layer 1 open too");
   const signed = signReport(args.secretKey, args.domain, {
     feedId: args.open.feedId,
     round: args.open.round,
@@ -51,6 +54,14 @@ export function buildReportPosts(args: BuildReportArgs): [SealedReportPost, Sign
       mlkemPublicKey: hexToBytes(args.open.mlkemPublicKey),
       x25519PublicKey: hexToBytes(args.open.x25519PublicKey),
     },
+    ...(args.outer
+      ? {
+          outer: {
+            mlkemPublicKey: hexToBytes(args.outer.mlkemPublicKey),
+            x25519PublicKey: hexToBytes(args.outer.x25519PublicKey),
+          },
+        }
+      : {}),
     report: signed,
   });
   return [

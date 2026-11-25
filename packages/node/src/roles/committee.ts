@@ -53,6 +53,9 @@ export async function runCommittee(ctx: NodeContext, opts: CommitteeOptions): Pr
             feedId: action.feedId,
             round: action.round,
             closeHeight: action.closeHeight,
+            // Two-dealer rounds: we deal one layer; the other member deals the other.
+            layer: action.layer,
+            layers: 2,
             members: [
               { mlkemPublicKey: memberKeys[0]! },
               { mlkemPublicKey: memberKeys[1]! },
@@ -68,17 +71,21 @@ export async function runCommittee(ctx: NodeContext, opts: CommitteeOptions): Pr
                 round: action.round,
                 member: d.member,
                 envelope: bytesToHex(d.envelope),
+                layer: action.layer,
               }),
             ),
           ];
           const tx = await native.send(messages);
-          ctx.log(`opened round ${action.round} of ${action.feedId.slice(0, 10)}…, closes at ${action.closeHeight} (tx ${tx.hash})`);
+          ctx.log(
+            `opened layer ${action.layer} of round ${action.round} of ${action.feedId.slice(0, 10)}…, closes at ${action.closeHeight} (tx ${tx.hash})`,
+          );
         } else {
           const { open } = action;
           const delivery = ctx.inbox.entries.find(
             (e) =>
               e.post.kind === "delivery" &&
               e.post.member === member &&
+              e.post.layer === open.layer &&
               e.post.feedId === open.feedId &&
               e.post.round === open.round &&
               e.poster === ctx.cfg.committee[open.dealer],
@@ -92,7 +99,7 @@ export async function runCommittee(ctx: NodeContext, opts: CommitteeOptions): Pr
             envelope: hexToBytes(delivery.post.envelope),
           });
           const tx = await native.send([inboxPostMessage(native.address, rollupId, releaseShare(open, share, height))]);
-          ctx.log(`released share for round ${open.round} (tx ${tx.hash})`);
+          ctx.log(`released layer ${open.layer ?? 0} share for round ${open.round} (tx ${tx.hash})`);
         }
       }
     },

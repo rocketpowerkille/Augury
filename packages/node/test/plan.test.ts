@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { FEEDS, type Hex, type InboxEntry, type InboxPost, type RoundConfig, type RoundOpen } from "@augury/shared";
-import { latestOpen, planCommittee, planReporter, planSequencer, roundKey } from "../src/plan.ts";
+import { latestOpen, outerOpenOf, planCommittee, planReporter, planSequencer, roundKey } from "../src/plan.ts";
 
 const addr = (n: number) => `0x${n.toString(16).padStart(40, "0")}` as Hex;
 const committee = [addr(0xc0), addr(0xc1), addr(0xc2)] as const;
@@ -40,7 +40,7 @@ describe("planCommittee", () => {
 
   it("the dealer of round 1 opens the first round", () => {
     assert.deepEqual(planCommittee({ ...base, entries: [], member: 1, height: 100n }), [
-      { kind: "deal", feedId: BTC, round: 1n, closeHeight: 130n },
+      { kind: "deal", feedId: BTC, round: 1n, closeHeight: 130n, layer: 0 },
     ]);
     assert.deepEqual(planCommittee({ ...base, entries: [], member: 0, height: 100n }), []);
   });
@@ -53,7 +53,7 @@ describe("planCommittee", () => {
   it("the next dealer opens the next round once the latest has closed", () => {
     const entries = inbox([dealerOf(1n), open(BTC, 1n, 130n)]);
     assert.deepEqual(planCommittee({ ...base, entries, member: 2, height: 131n }), [
-      { kind: "deal", feedId: BTC, round: 2n, closeHeight: 161n },
+      { kind: "deal", feedId: BTC, round: 2n, closeHeight: 161n, layer: 0 },
     ]);
   });
 
@@ -87,13 +87,69 @@ describe("planCommittee", () => {
   });
 });
 
+describe("two-dealer rounds", () => {
+  const base = { cfg, feeds: [BTC], roundBlocks: 30n };
+  const second = (round: bigint) => committee[Number((round + 1n) % 3n)]!;
+  const layer0 = { ...open(BTC, 1n, 130n), layer: 0, layers: 2 } as const;
+  const layer1 = { ...open(BTC, 1n, 130n), dealer: 2, layer: 1, layers: 2 } as const;
+
+  it("the second dealer opens layer 1 with the same close height, once", () => {
+    const entries = inbox([dealerOf(1n), layer0]);
+    assert.deepEqual(planCommittee({ ...base, entries, member: 2, height: 105n }), [
+      { kind: "deal", feedId: BTC, round: 1n, closeHeight: 130n, layer: 1 },
+    ]);
+    assert.deepEqual(planCommittee({ ...base, entries, member: 0, height: 105n }), []); // not its turn
+    const both = inbox([dealerOf(1n), layer0], [second(1n), layer1]);
+    assert.deepEqual(planCommittee({ ...base, entries: both, member: 2, height: 105n }), []);
+  });
+
+  it("ignores a layer 1 open with another close height or from the layer 0 dealer", () => {
+    const wrongClose = inbox([dealerOf(1n), layer0], [second(1n), { ...layer1, closeHeight: 999n }]);
+    assert.equal(outerOpenOf(cfg, wrongClose, layer0), undefined);
+    const sameDealer = inbox([dealerOf(1n), layer0], [dealerOf(1n), { ...layer1, dealer: 1 }]);
+    assert.equal(outerOpenOf(cfg, sameDealer, layer0), undefined);
+  });
+
+  it("reporters wait for layer 1, then get both opens", () => {
+    const me = addr(0x100);
+    const args = { cfg, reporter: me, feeds: [BTC], marginBlocks: 5n, height: 105n };
+    assert.deepEqual(planReporter({ ...args, entries: inbox([dealerOf(1n), layer0]) }), []);
+    const both = inbox([dealerOf(1n), layer0], [second(1n), layer1]);
+    assert.deepEqual(planReporter({ ...args, entries: both }), [{ open: layer0, outer: layer1 }]);
+  });
+
+  it("members release a share of each layer they were dealt", () => {
+    const d0 = { kind: "delivery", feedId: BTC, round: 1n, member: 0, envelope: "0xaa", layer: 0 } as const;
+    const d1 = { kind: "delivery", feedId: BTC, round: 1n, member: 0, envelope: "0xbb", layer: 1 } as const;
+    const entries = inbox([dealerOf(1n), layer0], [second(1n), layer1], [dealerOf(1n), d0], [second(1n), d1]);
+    const released = planCommittee({ ...base, feeds: [], entries, member: 0, height: 131n });
+    assert.deepEqual(
+      released.map((a) => (a.kind === "release" ? a.open.layer : -1)),
+      [0, 1],
+    );
+    const share0: InboxPost = {
+      kind: "share",
+      feedId: BTC,
+      round: 1n,
+      member: 0,
+      layer: 0,
+      parts: [
+        { index: 1, value: z32 },
+        { index: 2, value: z32 },
+      ],
+    };
+    const after = planCommittee({ ...base, feeds: [], entries: [...entries, ...inbox([committee[0], share0])], member: 0, height: 131n });
+    assert.deepEqual(after.map((a) => (a.kind === "release" ? a.open.layer : -1)), [1]);
+  });
+});
+
 describe("planReporter", () => {
   const me = addr(0x100);
   const base = { cfg, reporter: me, feeds: [BTC, ETH], marginBlocks: 5n };
 
   it("reports in each feed's latest open round with time to spare", () => {
     const entries = inbox([dealerOf(1n), open(BTC, 1n, 130n)], [dealerOf(2n), open(ETH, 2n, 110n)]);
-    const rounds = planReporter({ ...base, entries, height: 106n }).map((o) => [o.feedId, o.round]);
+    const rounds = planReporter({ ...base, entries, height: 106n }).map((o) => [o.open.feedId, o.open.round]);
     assert.deepEqual(rounds, [[BTC, 1n]]); // ETH closes at 110: 106 + 5 > 110
   });
 

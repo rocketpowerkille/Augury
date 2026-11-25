@@ -43,7 +43,7 @@ export async function runReporter(ctx: NodeContext, opts: ReporterOptions): Prom
         marginBlocks: opts.marginBlocks,
       });
 
-      for (const open of rounds) {
+      for (const { open, outer } of rounds) {
         const name = byId.get(open.feedId.toLowerCase())!;
         book.forgetBefore(open.feedId, open.round);
         let sources = "an earlier signing (resent)";
@@ -59,6 +59,7 @@ export async function runReporter(ctx: NodeContext, opts: ReporterOptions): Prom
             reporter: me,
             secretKey: opts.account.pqc.secretKey,
             open,
+            ...(outer ? { outer } : {}),
             price: observation!.price,
             observedAt: BigInt(Math.floor(Date.now() / 1000)),
           }),
