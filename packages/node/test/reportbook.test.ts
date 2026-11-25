@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, describe, it } from "node:test";
 import { buildReportPosts } from "@augury/reporter";
 import {
   bytesToHex,
@@ -85,5 +88,43 @@ describe("ReportBook", () => {
     assert.equal(book.has(BTC, 5n), false);
     assert.equal(book.has(BTC, 6n), true);
     assert.equal(book.has(ETH, 5n), true);
+  });
+
+  describe("on disk", () => {
+    const dir = mkdtempSync(join(tmpdir(), "augury-book-"));
+    after(() => rmSync(dir, { recursive: true, force: true }));
+
+    it("resends after a restart instead of signing again", () => {
+      const file = join(dir, "state", "reports.json");
+      const o = open(BTC, 9n);
+      const first = new ReportBook(file).postsFor(BTC, 9n, build(o));
+
+      let builds = 0;
+      const restarted = new ReportBook(file);
+      const again = restarted.postsFor(BTC, 9n, () => {
+        builds++;
+        return build(o)();
+      });
+      assert.equal(builds, 0);
+      assert.deepEqual(again, first);
+      assert.equal(typeof again[0].round, "bigint");
+    });
+
+    it("keeps the file readable by its owner only", () => {
+      const file = join(dir, "private", "reports.json");
+      new ReportBook(file).postsFor(BTC, 1n, build(open(BTC, 1n)));
+      assert.equal(statSync(file).mode & 0o777, 0o600);
+    });
+
+    it("saves forgotten rounds too", () => {
+      const file = join(dir, "forget", "reports.json");
+      const book = new ReportBook(file);
+      book.postsFor(BTC, 1n, build(open(BTC, 1n)));
+      book.postsFor(BTC, 2n, build(open(BTC, 2n)));
+      book.forgetBefore(BTC, 2n);
+      const reloaded = new ReportBook(file);
+      assert.equal(reloaded.has(BTC, 1n), false);
+      assert.equal(reloaded.has(BTC, 2n), true);
+    });
   });
 });

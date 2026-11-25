@@ -24,6 +24,7 @@ options:
   --round-blocks <n>     committee: blocks a round stays open (default 60)
   --margin-blocks <n>    reporter: blocks kept before a round closes (default 5)
   --from-block <n>       watchtower: EVM block to watch from (default: 5000 blocks back)
+  --state <dir>          reporter: where signed reports are kept across restarts (default state)
   --interval <ms>        time between ticks (default 5000)
   --once                 run a single tick and exit`;
 
@@ -36,6 +37,7 @@ const { values, positionals } = parseArgs({
     "round-blocks": { type: "string", default: "60" },
     "margin-blocks": { type: "string", default: "5" },
     "from-block": { type: "string" },
+    state: { type: "string", default: "state" },
     interval: { type: "string", default: "5000" },
     once: { type: "boolean", default: false },
     help: { type: "boolean", default: false },
@@ -65,7 +67,7 @@ switch (role) {
   case "reporter": {
     const unsupported = feedNames.filter((f) => !REPORTABLE_FEEDS.includes(f));
     if (unsupported.length > 0) throw new Error(`no price source yet for ${unsupported.join(", ")}`);
-    await runReporter(ctx, { account, feeds: feedNames, marginBlocks: BigInt(values["margin-blocks"]), ...loop });
+    await runReporter(ctx, { account, feeds: feedNames, marginBlocks: BigInt(values["margin-blocks"]), stateDir: values.state, ...loop });
     break;
   }
   case "sequencer":

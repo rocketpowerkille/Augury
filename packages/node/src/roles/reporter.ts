@@ -3,6 +3,7 @@ import { buildReportPosts, observePrice, type FeedName } from "@augury/reporter"
 import { FEEDS, type Hex } from "@augury/shared";
 import type { UnifiedAccount } from "@qorechain/sdk";
 import { planReporter } from "../plan.ts";
+import { join } from "node:path";
 import { ReportBook } from "../reportbook.ts";
 import { latestHeight, runLoop, type NodeContext } from "../runtime.ts";
 
@@ -14,6 +15,8 @@ export interface ReporterOptions {
   marginBlocks: bigint;
   intervalMs: number;
   once: boolean;
+  /** Folder where the reporter keeps the reports it signed, so a restart resends them. */
+  stateDir: string;
 }
 
 /** A reporter: for each open round, observe the price, sign it, seal it and post it. */
@@ -23,7 +26,7 @@ export async function runReporter(ctx: NodeContext, opts: ReporterOptions): Prom
   const byId = new Map<string, FeedName>(opts.feeds.map((name) => [FEEDS[name].toLowerCase(), name]));
   const feedIds: Hex[] = opts.feeds.map((name) => FEEDS[name]);
   // One signed report per round, resent unchanged on retry (signing again would equivocate).
-  const book = new ReportBook();
+  const book = new ReportBook(join(opts.stateDir, `reports-${ctx.deployment.hub.toLowerCase()}-${me.toLowerCase()}.json`));
   ctx.log(`reporter ${me} ready for ${opts.feeds.join(", ")}`);
 
   await runLoop(

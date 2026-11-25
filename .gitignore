@@ -19,6 +19,8 @@ contracts/broadcast/
 *.seed
 secrets/
 keys/
+# Node state: the reporter's signed reports hold sealed salts until each round closes
+state/
 
 # Editors and OS
 .vscode/
