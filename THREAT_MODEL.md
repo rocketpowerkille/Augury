@@ -63,7 +63,7 @@
 1. **Omitted reports are not yet provable on the EVM.** The inbox lives on QoreChain's native lane, which AuguryHub cannot read. The watchtower can detect an omission, but slashing for it needs a bridge from inbox data to the hub. Until then, omission is an alert, not a slashable fault.
 2. **Report freshness is not enforced on-chain.** `observedAt` is signed but not checked against the round's time window.
 3. **Two colluding committee members can open reports early** and leak them to a reporter. A larger threshold or time-lock encryption would reduce this.
-4. **The member who deals a round's seed knows it alone.** The dealer rotates every round, so the 2-of-3 guarantee holds against the other members, not against that round's dealer. A design that removes the single dealer with the official kits alone is in section 7; it is not built yet.
+4. **Resolved in code: no single member knows a round's whole key.** Rounds now have two dealers, each knowing only its own seed, and reports are sealed to both keys (section 7). Not yet run on testnet: the live rounds in EVIDENCE.md used one dealer.
 5. **Challenger rewards are pushed** to the `rewardTo` address the challenger names. A caller that cannot receive QOR can still challenge by naming an account that can.
 6. **The ML-DSA-87 algorithm id** returned by `pqcKeyStatus` is a deploy-time parameter. It is 1: the official SDK defines `AlgorithmDilithium5 = 1`, and `pqcKeyStatus` on `qorechain-diana` reports 1 for a registered ML-DSA-87 key (see EVIDENCE.md).
 7. **`getPrice` is optimistic.** It returns batches still inside their challenge window. Consumers that need certainty must use `getFinalPrice`.
@@ -83,13 +83,13 @@
 |---|---|---|
 | 2026-11-26 | Report signing and salting, QoreSeal sealing (hybrid for reports, ML-KEM-only for share deliveries), 2-of-3 seed sharing and commitments, the round processor, AuguryHub's signature checks, fraud proof and equivocation proof, the PQC precompile wrappers, settlement anchoring and receipts | T14 and T15 fixed in the contract; T16 fixed in the reporter node; T17 reviewed and accepted; T18 fixed in `settle.ts`; gaps 13 to 16 added. Confirmed sound: the CSPRNG salt; the round key is checked against the committed seed before any report is opened; canonical re-encoding of decoded reports; domain separation by tag, chain id, hub, feed and round; the precompile wrappers fail closed. Prepared with an AI assistant (see AI_USAGE.md) and owned by the team's PQC/security member |
 
-## 7. Design: removing the single dealer
+## 7. Two dealers per round
 
-Today one member deals each round and knows that round's seed. True distributed key generation for ML-KEM is open research and not offered by the kits. A simpler step with the same kits:
+With one dealer, that member knows the round's seed alone. True distributed key generation for ML-KEM is open research and not offered by the kits, so Augury uses a simpler construction with the same kits. Built in `packages/committee`, `packages/shared` (`round.ts`, `crypto.ts`, inbox format version 3) and `packages/node`; tested end to end in `packages/e2e/test/two-dealer.e2e.test.ts`:
 
-1. **Two dealers per round.** Two different members each deal their own round key, exactly as one dealer does today: an independent seed, its 2-of-3 parts with commitments, and sealed deliveries.
-2. **Reports sealed twice.** A reporter seals its signed message to the first round key, then seals that envelope to the second. Measured with QoreSeal 0.1.0: one layer is 2,008 bytes and two layers are 3,728 bytes, inside the 6,144-byte post limit.
+1. **Two dealers per round.** Member `round mod 3` deals layer 0 and declares two layers; member `(round + 1) mod 3` then deals layer 1 with the same close height. Each layer has an independent seed, its 2-of-3 parts with commitments, and sealed deliveries bound to the layer. Reports count only once both opens are on the inbox.
+2. **Reports sealed twice.** A reporter seals its signed message to the layer 0 key, then seals that envelope to the layer 1 key under a separate QoreSeal purpose. Measured with QoreSeal 0.1.0: one layer is 2,008 bytes and two layers are 3,728 bytes, inside the 6,144-byte post limit.
 3. **Opening needs both seeds.** Each dealer knows only its own seed, so neither can open a report before the close. Opening early needs both seeds, which takes both dealers or two members releasing early: the same two-member collusion threshold as gap 3, with no single member able to cheat alone.
 4. **Cost.** One more round-open post and its deliveries per round, about 1,720 more bytes per report, and a second decryption for the sequencer and watchtower. Nothing changes on chain: AuguryHub never sees the envelopes.
 
-This removes gap 4 without new cryptography. Gap 3 (two colluding members) remains, and needs a larger committee or time-lock encryption.
+The end-to-end test checks that either dealer's whole seed, alone or used twice, cannot open a report, that both seeds can, and that a report sealed to one key only is rejected. This removes gap 4 without new cryptography. Gap 3 (two colluding members) remains, and needs a larger committee or time-lock encryption.
