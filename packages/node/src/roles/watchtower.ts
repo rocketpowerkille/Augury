@@ -8,7 +8,7 @@ import {
   reportEquivocationCalldata,
   type PostedBatchOnChain,
 } from "@augury/chain";
-import { ML_DSA_87_ALGORITHM_ID, type Hex } from "@augury/shared";
+import type { Hex } from "@augury/shared";
 import { auditBatch } from "@augury/watchtower";
 import type { UnifiedAccount } from "@qorechain/sdk";
 import { runLoop, type NodeContext } from "../runtime.ts";
@@ -47,7 +47,7 @@ export async function runWatchtower(ctx: NodeContext, opts: WatchtowerOptions): 
           .map((e) => e.poster),
       ]),
     ];
-    const view = await loadChainView(ctx.evm, ctx.deployment.hub, accounts, ML_DSA_87_ALGORITHM_ID);
+    const view = await loadChainView(ctx.evm, ctx.deployment.hub, accounts);
     const findings = auditBatch(ctx.cfg, view, ctx.inbox.entries, { header: batch.header, reports: batch.reports });
 
     if (findings.length === 0) ctx.log(`round ${round}: batch ${batch.txHash} checks out`);

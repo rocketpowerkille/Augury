@@ -1,5 +1,5 @@
 import { bytesToHex, hexToBytes, type ChainView, type Hex, type SignedReport } from "@augury/shared";
-import { evmWindowCost, evmWindowStatus, openEvmWindowMessage, pqcKeyStatus } from "@qorechain/evm";
+import { evmWindowCost, evmWindowStatus, openEvmWindowMessage } from "@qorechain/evm";
 import {
   createPublicClient,
   createWalletClient,
@@ -92,16 +92,14 @@ export function publicClient(net: Network): PublicClient {
 }
 
 /**
- * A snapshot of what the round processor needs to know about `accounts`: each one's
- * registered ML-DSA-87 key and whether it is an active reporter. `ChainView` is synchronous,
- * so the reads happen here, up front.
+ * A snapshot of what the round processor needs to know about `accounts`: the ML-DSA-87 key
+ * AuguryHub pinned for each one when it staked, and whether it is an active reporter. The
+ * pinned key is used rather than the account's current key in pqcKeyStatus, because the hub's
+ * fraud proof checks reports against the pinned key: a reporter that rotated its key must not
+ * be accepted here and then fail on chain. `ChainView` is synchronous, so the reads happen
+ * here, up front.
  */
-export async function loadChainView(
-  client: PublicClient,
-  hub: Hex,
-  accounts: readonly Hex[],
-  mldsaAlgorithmId: number,
-): Promise<ChainView> {
+export async function loadChainView(client: PublicClient, hub: Hex, accounts: readonly Hex[]): Promise<ChainView> {
   const keys = new Map<string, Uint8Array>();
   const active = new Set<string>();
   const minStake = await client.readContract({ address: hub, abi: auguryHubAbi, functionName: "minReporterStake" });
@@ -109,17 +107,12 @@ export async function loadChainView(
   await Promise.all(
     accounts.map(async (account) => {
       const id = account.toLowerCase();
-      const status = await pqcKeyStatus(client, account);
-      if (status.registered && status.algorithmId === mldsaAlgorithmId) {
-        keys.set(id, Uint8Array.from(Buffer.from(status.pubkey.slice(2), "hex")));
-      }
-      const [stake, exitRequestedAt] = await client.readContract({
-        address: hub,
-        abi: auguryHubAbi,
-        functionName: "reporters",
-        args: [account],
-      });
-      if (stake >= minStake && exitRequestedAt === 0n) active.add(id);
+      const [pinned, [stake, exitRequestedAt, activeSince, slashedAt]] = await Promise.all([
+        client.readContract({ address: hub, abi: auguryHubAbi, functionName: "reporterKeys", args: [account] }),
+        client.readContract({ address: hub, abi: auguryHubAbi, functionName: "reporters", args: [account] }),
+      ]);
+      if (pinned.length > 2) keys.set(id, Uint8Array.from(Buffer.from(pinned.slice(2), "hex")));
+      if (isActiveNow({ stake, exitRequestedAt, activeSince, slashedAt }, minStake)) active.add(id);
     }),
   );
 
@@ -127,6 +120,19 @@ export async function loadChainView(
     reporterKey: (a) => keys.get(a.toLowerCase()),
     isActive: (a) => active.has(a.toLowerCase()),
   };
+}
+
+/** A reporter's record in AuguryHub (`reporters(address)`). */
+export interface StakerRecord {
+  stake: bigint;
+  exitRequestedAt: bigint;
+  activeSince: bigint;
+  slashedAt: bigint;
+}
+
+/** Whether a reporter counts as active for a batch posted now, by the same rule as `isActiveAt`. */
+export function isActiveNow(s: StakerRecord, minStake: bigint): boolean {
+  return s.stake >= minStake && s.activeSince !== 0n && s.exitRequestedAt === 0n && s.slashedAt === 0n;
 }
 
 /** AuguryHub.latestRound for each feed, keyed by lowercase feed id. */

@@ -15,7 +15,9 @@ import {QorePQC} from "./libraries/QorePQC.sol";
 ///
 /// No logic reads `msg.sender`. Batches, exits and withdrawals are authorized by ML-DSA-87
 /// signatures checked with the pqcVerify precompile, against keys read from the chain with
-/// pqcKeyStatus. Deposits name the reporter they credit, and challengers name where their
+/// pqcKeyStatus. A reporter's key is pinned when it stakes, so reports are always judged by
+/// the key and the status the reporter had when the batch was posted, even if the reporter
+/// later rotates its key or is slashed. Deposits name the reporter they credit, and challengers name where their
 /// reward goes, so the hub works the same whether it is called by a plain EVM transaction
 /// or through QoreChain's hybrid-signed cross-VM call.
 contract AuguryHub is IAugury {
@@ -49,9 +51,14 @@ contract AuguryHub is IAugury {
         bytes signature;
     }
 
+    /// @dev `activeSince` is when the stake last reached `minReporterStake`; `slashedAt` is
+    /// when the reporter was slashed for equivocation (it can never stake again). Both stay
+    /// set after the stake is gone, so batches posted earlier are still judged correctly.
     struct Staker {
         uint256 stake;
         uint64 exitRequestedAt;
+        uint64 activeSince;
+        uint64 slashedAt;
     }
 
     // ---------------------------------------------------------------------------------------
@@ -91,6 +98,10 @@ contract AuguryHub is IAugury {
     mapping(bytes32 feedId => mapping(uint64 round => Batch)) public batches;
     mapping(bytes32 feedId => uint64) public latestRound;
     mapping(address reporter => Staker) public reporters;
+    /// @notice The ML-DSA-87 public key each reporter's reports are checked against, pinned
+    /// from pqcKeyStatus when the reporter starts staking. Rotating the key on chain does not
+    /// change it; a reporter that rotates must exit, withdraw and stake again.
+    mapping(address reporter => bytes) public reporterKeys;
     /// @notice Per-account nonce for signed exits and withdrawals.
     mapping(address account => uint64) public nonces;
 
@@ -136,6 +147,7 @@ contract AuguryHub is IAugury {
     error BadSignature();
     error ZeroAmount();
     error ExitPending();
+    error ReporterBanned();
     error NoExitRequested();
     error ExitNotReady();
     error NothingStaked();
@@ -257,13 +269,18 @@ contract AuguryHub is IAugury {
     // ---------------------------------------------------------------------------------------
 
     /// @notice Add stake for `reporter`, which must have an ML-DSA-87 key registered. Anyone
-    /// may fund any reporter; only the reporter's key can take the stake out.
+    /// may fund any reporter; only the reporter's key can take the stake out. The first
+    /// deposit pins the reporter's current key (see `reporterKeys`).
     function stake(address reporter) external payable {
         if (msg.value == 0) revert ZeroAmount();
-        _requireKey(reporter);
+        bytes memory pubkey = _requireKey(reporter);
         Staker storage s = reporters[reporter];
+        if (s.slashedAt != 0) revert ReporterBanned();
         if (s.exitRequestedAt != 0) revert ExitPending();
+        if (s.stake == 0) reporterKeys[reporter] = pubkey;
+        bool wasActive = s.stake >= minReporterStake;
         s.stake += msg.value;
+        if (!wasActive && s.stake >= minReporterStake) s.activeSince = uint64(block.timestamp);
         emit Staked(reporter, msg.value, s.stake);
     }
 
@@ -292,14 +309,19 @@ contract AuguryHub is IAugury {
         uint256 amount = s.stake;
         s.stake = 0;
         s.exitRequestedAt = 0;
+        s.activeSince = 0;
         emit StakeWithdrawn(reporter, to, amount);
         _send(to, amount);
     }
 
-    /// @notice True if `reporter` counted as active for a batch posted at `at`.
+    /// @notice True if `reporter` counted as active for a batch posted at `at`: its stake had
+    /// reached the minimum by then, and it had neither asked to exit nor been slashed yet.
+    /// Judged from recorded times, not the current stake, so slashing or topping up a reporter
+    /// after a batch was posted cannot change whether that batch was honest.
     function isActiveAt(address reporter, uint64 at) public view returns (bool) {
         Staker storage s = reporters[reporter];
-        return s.stake >= minReporterStake && (s.exitRequestedAt == 0 || s.exitRequestedAt > at);
+        return s.activeSince != 0 && s.activeSince <= at
+            && (s.exitRequestedAt == 0 || s.exitRequestedAt > at) && (s.slashedAt == 0 || s.slashedAt > at);
     }
 
     // ---------------------------------------------------------------------------------------
@@ -417,13 +439,14 @@ contract AuguryHub is IAugury {
         bytes memory messageB = _messageOf(feedId, round, b);
         if (keccak256(messageA) == keccak256(messageB)) revert NotEquivocation();
         address reporter = a.reporter;
-        if (!_verifyBy(reporter, messageA, a.signature)) revert BadSignature();
-        if (!_verifyBy(reporter, messageB, b.signature)) revert BadSignature();
+        if (!_verifyReport(reporter, messageA, a.signature)) revert BadSignature();
+        if (!_verifyReport(reporter, messageB, b.signature)) revert BadSignature();
 
         Staker storage s = reporters[reporter];
         uint256 amount = s.stake;
         if (amount == 0) revert NothingStaked();
         s.stake = 0;
+        s.slashedAt = uint64(block.timestamp);
         uint256 reward = amount / 2;
         slashedTotal += amount - reward;
         emit ReporterSlashed(reporter, amount, rewardTo);
@@ -505,7 +528,7 @@ contract AuguryHub is IAugury {
                 if (reports[j].reporter == r.reporter) return (true, FraudKind.DuplicateReporter);
             }
             if (!isActiveAt(r.reporter, b.postedAt)) return (true, FraudKind.InactiveReporter);
-            if (!_verifyBy(r.reporter, _messageOf(feedId, round, r), r.signature)) {
+            if (!_verifyReport(r.reporter, _messageOf(feedId, round, r), r.signature)) {
                 return (true, FraudKind.BadSignature);
             }
             prices[i] = r.price;
@@ -556,9 +579,23 @@ contract AuguryHub is IAugury {
         return QorePQC.verify(pubkey, signature, message);
     }
 
-    function _requireKey(address account) internal view {
-        (bool registered, uint8 algorithmId,) = QorePQC.keyStatus(account);
-        if (!registered || algorithmId != mldsaAlgorithmId) revert KeyNotRegistered(account);
+    /// @dev Verify a report signature against the reporter's pinned key (see `reporterKeys`).
+    function _verifyReport(address reporter, bytes memory message, bytes calldata signature)
+        internal
+        view
+        returns (bool)
+    {
+        bytes memory pubkey = reporterKeys[reporter];
+        if (pubkey.length == 0) return false;
+        return QorePQC.verify(pubkey, signature, message);
+    }
+
+    function _requireKey(address account) internal view returns (bytes memory pubkey) {
+        (bool registered, uint8 algorithmId, bytes memory key) = QorePQC.keyStatus(account);
+        if (!registered || algorithmId != mldsaAlgorithmId || key.length == 0) {
+            revert KeyNotRegistered(account);
+        }
+        return key;
     }
 
     function _send(address payable to, uint256 amount) internal {

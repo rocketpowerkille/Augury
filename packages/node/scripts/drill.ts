@@ -23,7 +23,7 @@ import {
   testnet,
 } from "@augury/chain";
 import { buildBatch } from "@augury/sequencer";
-import { FEEDS, ML_DSA_87_ALGORITHM_ID, signBatch, type Hex } from "@augury/shared";
+import { FEEDS, signBatch, type Hex } from "@augury/shared";
 
 const { values } = parseArgs({
   options: {
@@ -56,7 +56,7 @@ const reporters: Hex[] = [
       .map((e) => e.poster),
   ),
 ];
-const view = await loadChainView(publicClient(net), deployment.hub, reporters, ML_DSA_87_ALGORITHM_ID);
+const view = await loadChainView(publicClient(net), deployment.hub, reporters);
 const honest = buildBatch(cfg, view, entries, feedId, round, account.pqc.secretKey);
 if (!honest.batch) {
   console.log(`round ${round} of ${values.feed} is not ready: ${honest.outcome.status}`);

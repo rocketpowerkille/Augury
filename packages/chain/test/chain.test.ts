@@ -4,12 +4,14 @@ import { encodePost, FEEDS, type SignedReport } from "@augury/shared";
 import { deriveUnifiedAccount, evmToQor, qorechainRegistry, verifyProofOfPossession } from "@qorechain/sdk";
 import { openEvmWindowMessage } from "@qorechain/evm";
 import {
+  auguryHubAbi,
   auguryRegistry,
   challengeBatchCalldata,
   createRollupMessage,
   feeFor,
   gasFor,
   inboxPostMessage,
+  isActiveNow,
   parseAccountSequence,
   parseDeployment,
   postBatchCalldata,
@@ -236,5 +238,30 @@ describe("AuguryHub calldata matches cast", () => {
 
   it("stake", () => {
     assert.equal(stakeCalldata("0x2222222222222222222222222222222222222222"), "0x264762040000000000000000000000002222222222222222222222222222222222222222");
+  });
+});
+
+describe("reporter activity", () => {
+  const MIN = 1_000_000n;
+  const staked = { stake: MIN, exitRequestedAt: 0n, activeSince: 100n, slashedAt: 0n };
+
+  it("counts a staked reporter as active", () => {
+    assert.equal(isActiveNow(staked, MIN), true);
+  });
+
+  it("does not count a reporter below the minimum, exiting, slashed or never activated", () => {
+    assert.equal(isActiveNow({ ...staked, stake: MIN - 1n }, MIN), false);
+    assert.equal(isActiveNow({ ...staked, exitRequestedAt: 200n }, MIN), false);
+    assert.equal(isActiveNow({ ...staked, slashedAt: 200n }, MIN), false);
+    assert.equal(isActiveNow({ ...staked, activeSince: 0n }, MIN), false);
+  });
+
+  it("reads reporters() as four fields and reporterKeys() from the hub ABI", () => {
+    const reporters = auguryHubAbi.find((x) => x.type === "function" && x.name === "reporters");
+    assert.deepEqual(
+      reporters && "outputs" in reporters ? reporters.outputs.map((o) => o.name) : [],
+      ["stake", "exitRequestedAt", "activeSince", "slashedAt"],
+    );
+    assert.ok(auguryHubAbi.some((x) => x.type === "function" && x.name === "reporterKeys"));
   });
 });

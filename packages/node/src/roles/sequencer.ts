@@ -7,7 +7,7 @@ import {
   postBatchCalldata,
 } from "@augury/chain";
 import { buildBatch } from "@augury/sequencer";
-import { ML_DSA_87_ALGORITHM_ID, type Hex } from "@augury/shared";
+import type { Hex } from "@augury/shared";
 import type { UnifiedAccount } from "@qorechain/sdk";
 import { planSequencer, roundKey } from "../plan.ts";
 import { latestHeight, runLoop, type NodeContext } from "../runtime.ts";
@@ -46,7 +46,7 @@ export async function runSequencer(ctx: NodeContext, opts: SequencerOptions): Pr
               .map((e) => e.poster),
           ),
         ];
-        const view = await loadChainView(ctx.evm, ctx.deployment.hub, reporters, ML_DSA_87_ALGORITHM_ID);
+        const view = await loadChainView(ctx.evm, ctx.deployment.hub, reporters);
         const { outcome, batch } = buildBatch(ctx.cfg, view, ctx.inbox.entries, feedId, round, opts.account.pqc.secretKey);
 
         if (batch) {

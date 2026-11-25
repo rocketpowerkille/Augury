@@ -200,9 +200,9 @@ contract AuguryHubTest is Test {
         vm.deal(funder, 1 ether);
         vm.prank(funder);
         hub.stake{value: 1 ether}(r);
-        (uint256 total,) = hub.reporters(r);
+        (uint256 total,,,) = hub.reporters(r);
         assertEq(total, MIN_STAKE + 1 ether);
-        (uint256 funderStake,) = hub.reporters(funder);
+        (uint256 funderStake,,,) = hub.reporters(funder);
         assertEq(funderStake, 0);
     }
 
@@ -229,7 +229,7 @@ contract AuguryHubTest is Test {
         vm.warp(block.timestamp + EXIT_DELAY);
         hub.withdrawStake(r, to, sig);
         assertEq(to.balance, MIN_STAKE);
-        (uint256 left,) = hub.reporters(r);
+        (uint256 left,,,) = hub.reporters(r);
         assertEq(left, 0);
     }
 
@@ -447,7 +447,7 @@ contract AuguryHubTest is Test {
         AuguryHub.SignedReport memory b = _report(1, 0, 200);
         vm.prank(challenger);
         hub.reportEquivocation(FEED, 1, a, b, payable(challenger));
-        (uint256 left,) = hub.reporters(reporterList[0]);
+        (uint256 left,,,) = hub.reporters(reporterList[0]);
         assertEq(left, 0);
         assertEq(challenger.balance, MIN_STAKE / 2);
     }
@@ -466,7 +466,7 @@ contract AuguryHubTest is Test {
             )
         });
         hub.reportEquivocation(FEED, 1, a, b, payable(challenger));
-        (uint256 left,) = hub.reporters(reporterList[0]);
+        (uint256 left,,,) = hub.reporters(reporterList[0]);
         assertEq(left, 0);
     }
 
@@ -482,6 +482,118 @@ contract AuguryHubTest is Test {
         b.signature = hex"01";
         vm.expectRevert(AuguryHub.BadSignature.selector);
         hub.reportEquivocation(FEED, 1, a, b, payable(challenger));
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Reports are judged by the state at post time
+    // ---------------------------------------------------------------------------------------
+
+    function _rotateKey(address who) internal returns (bytes memory newKey) {
+        newKey = abi.encodePacked("rotated-", who);
+        keyStatus.setKey(who, true, ALG, newKey);
+    }
+
+    function _signWith(bytes memory pubkey, bytes memory message) internal pure returns (bytes memory) {
+        return abi.encodePacked(keccak256(abi.encodePacked(pubkey, message)));
+    }
+
+    function test_StakePinsTheReportersKey() public view {
+        address r = reporterList[0];
+        assertEq(hub.reporterKeys(r), _pubkey(r));
+        (,, uint64 activeSince, uint64 slashedAt) = hub.reporters(r);
+        assertEq(activeSince, uint64(block.timestamp));
+        assertEq(slashedAt, 0);
+    }
+
+    /// Regression: a reporter in an honest batch slashed itself for equivocation, which made it
+    /// look inactive at the batch's post time and let it take half of the sequencer's bond.
+    function test_SlashingAReporterLaterDoesNotMakeAnHonestBatchFraudulent() public {
+        AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
+        _post(1, rs, 101);
+        vm.warp(block.timestamp + 1);
+
+        hub.reportEquivocation(FEED, 7, _report(7, 0, 100), _report(7, 0, 200), payable(challenger));
+        assertFalse(hub.isActiveAt(reporterList[0], uint64(block.timestamp)));
+
+        vm.expectRevert(AuguryHub.NoFraud.selector);
+        hub.challengeBatch(FEED, 1, rs, payable(challenger));
+        assertEq(hub.sequencerBond(), MIN_BOND);
+    }
+
+    /// Regression: a reporter in an honest batch rotated its ML-DSA key on chain, so its report
+    /// no longer verified against the current key and the honest sequencer could be slashed.
+    function test_RotatingAKeyLaterDoesNotMakeAnHonestBatchFraudulent() public {
+        AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
+        _post(1, rs, 101);
+        _rotateKey(reporterList[0]);
+
+        vm.expectRevert(AuguryHub.NoFraud.selector);
+        hub.challengeBatch(FEED, 1, rs, payable(challenger));
+        assertEq(hub.sequencerBond(), MIN_BOND);
+    }
+
+    function test_ReportSignedWithARotatedKeyIsFraud() public {
+        address r = reporterList[0];
+        bytes memory newKey = _rotateKey(r);
+        AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
+        rs[0].signature = _signWith(
+            newKey, hub.reportMessage(FEED, 1, r, rs[0].price, rs[0].observedAt, rs[0].salt)
+        );
+        _post(1, rs, 101);
+        hub.challengeBatch(FEED, 1, rs, payable(challenger));
+        (,,,,, AuguryHub.Status status) = hub.batches(FEED, 1);
+        assertEq(uint8(status), uint8(AuguryHub.Status.Invalid));
+    }
+
+    function test_EquivocationEvidenceSurvivesKeyRotation() public {
+        AuguryHub.SignedReport memory a = _report(1, 0, 100);
+        AuguryHub.SignedReport memory b = _report(1, 0, 200);
+        _rotateKey(reporterList[0]);
+        hub.reportEquivocation(FEED, 1, a, b, payable(challenger));
+        (uint256 left,,,) = hub.reporters(reporterList[0]);
+        assertEq(left, 0);
+    }
+
+    function test_SlashedReporterCannotStakeAgain() public {
+        address r = reporterList[0];
+        hub.reportEquivocation(FEED, 1, _report(1, 0, 100), _report(1, 0, 200), payable(challenger));
+        vm.prank(r);
+        vm.expectRevert(AuguryHub.ReporterBanned.selector);
+        hub.stake{value: MIN_STAKE}(r);
+    }
+
+    function test_TopUpAfterPostDoesNotHideAnUnderstakedReporter() public {
+        address late = makeAddr("late");
+        _registerKey(late);
+        vm.deal(late, 10 ether);
+        vm.prank(late);
+        hub.stake{value: MIN_STAKE / 2}(late);
+        reporterList[0] = late;
+
+        AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
+        _post(1, rs, 101);
+        vm.warp(block.timestamp + 1);
+        vm.prank(late);
+        hub.stake{value: MIN_STAKE}(late);
+
+        hub.challengeBatch(FEED, 1, rs, payable(challenger));
+        (,,,,, AuguryHub.Status status) = hub.batches(FEED, 1);
+        assertEq(uint8(status), uint8(AuguryHub.Status.Invalid));
+    }
+
+    function test_StakingAgainAfterWithdrawPinsTheNewKey() public {
+        address r = reporterList[0];
+        address payable to = payable(makeAddr("payout"));
+        hub.requestExit(r, _sign(r, hub.exitMessage(hub.REPORTER_EXIT_TAG(), r, 0)));
+        vm.warp(block.timestamp + EXIT_DELAY);
+        hub.withdrawStake(r, to, _sign(r, hub.withdrawMessage(hub.REPORTER_WITHDRAW_TAG(), r, to, 1)));
+
+        bytes memory newKey = _rotateKey(r);
+        vm.prank(r);
+        hub.stake{value: MIN_STAKE}(r);
+        assertEq(hub.reporterKeys(r), newKey);
+        (,, uint64 activeSince,) = hub.reporters(r);
+        assertEq(activeSince, uint64(block.timestamp));
     }
 
     // ---------------------------------------------------------------------------------------
