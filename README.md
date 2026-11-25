@@ -185,7 +185,8 @@ Some data must not be public: the daily NAV of a tokenized fund, a credit score,
 
 - Only paying subscribers can decrypt the value.
 - When a subscription lapses, the epoch key rotates and the former subscriber cannot read new values.
-- AuguryHub stores a commitment to each value, so a subscriber can prove to a contract that the value they used is the one Augury published.
+- The `PrivateFeeds` contract stores a salted SHA-256 commitment to each value, signed with the publisher's ML-DSA-87 key and checked with `pqcVerify`, so a subscriber can prove to a contract (`verifyValue`) that the value they used is the one that was published. The salt travels only inside the sealed value, so nobody else can test guessed values against the commitment.
+- Built in `packages/shared/src/privatefeed.ts` and `contracts/src/PrivateFeeds.sol`; `packages/node/scripts/private-feed.ts` runs it on the testnet.
 
 ## Using Augury from a contract
 
