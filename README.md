@@ -138,7 +138,7 @@ flowchart LR
 | Batch signatures | ML-DSA-87 | The sequencer's batches are what applications trust |
 | Report sealing | ML-KEM-1024 (FIPS 203), via QoreSeal | Reports stay hidden until the round closes, which prevents copying |
 | Private feeds | QoreSeal epoch keys (ML-KEM-1024) | Only current subscribers can read; a lapsed subscriber is rotated out |
-| Hashing | SHAKE-256 | Report roots and commitments |
+| Hashing | SHA-256 | Report leaves and roots, seed-part commitments, feed ids. Matches the EVM's native `sha256` precompile, so the fraud proof can recompute roots cheaply |
 | Transactions | Hybrid secp256k1 + ML-DSA-87 | QoreChain's post-quantum transaction format |
 
 **Keys are registered on-chain with proof of possession.** AuguryHub refuses reports and batches signed by keys that `pqcKeyStatus` does not show as registered.
