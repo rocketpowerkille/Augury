@@ -12,6 +12,7 @@ import {
   gasFor,
   inboxPostMessage,
   isActiveNow,
+  loadChainView,
   parseAccountSequence,
   parseDeployment,
   postBatchCalldata,
@@ -263,5 +264,35 @@ describe("reporter activity", () => {
       ["stake", "exitRequestedAt", "activeSince", "slashedAt"],
     );
     assert.ok(auguryHubAbi.some((x) => x.type === "function" && x.name === "reporterKeys"));
+  });
+});
+
+describe("loadChainView", () => {
+  const MIN = 1_000_000n;
+  const reporter = "0x00000000000000000000000000000000000000aa" as const;
+  const hub = "0x00000000000000000000000000000000000000bb" as const;
+  // A reporter that was active when a batch was posted at t=100, then asked to exit at t=150.
+  const fakeClient = {
+    async readContract({ functionName, args }: { functionName: string; args?: readonly unknown[] }) {
+      if (functionName === "minReporterStake") return MIN;
+      if (functionName === "reporterKeys") return "0x0102";
+      if (functionName === "reporters") return [MIN, 150n, 50n, 0n] as const;
+      if (functionName === "isActiveAt") return (args![1] as bigint) < 150n;
+      throw new Error(`unexpected read ${functionName}`);
+    },
+  } as unknown as Parameters<typeof loadChainView>[0];
+
+  it("reads the pinned key", async () => {
+    const view = await loadChainView(fakeClient, hub, [reporter]);
+    assert.deepEqual(view.reporterKey(reporter), Uint8Array.of(1, 2));
+  });
+
+  it("judges activity now for the sequencer", async () => {
+    assert.equal((await loadChainView(fakeClient, hub, [reporter])).isActive(reporter), false);
+  });
+
+  it("judges activity at the batch's post time for the watchtower, as the hub does", async () => {
+    assert.equal((await loadChainView(fakeClient, hub, [reporter], 100n)).isActive(reporter), true);
+    assert.equal((await loadChainView(fakeClient, hub, [reporter], 200n)).isActive(reporter), false);
   });
 });

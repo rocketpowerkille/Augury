@@ -1,4 +1,5 @@
 import {
+  batchPostedAt,
   challengeBatchCalldata,
   evmAddress,
   HubSender,
@@ -47,7 +48,9 @@ export async function runWatchtower(ctx: NodeContext, opts: WatchtowerOptions): 
           .map((e) => e.poster),
       ]),
     ];
-    const view = await loadChainView(ctx.evm, ctx.deployment.hub, accounts);
+    // Judge activity when the batch was posted, as the hub's fraud proof does.
+    const postedAt = await batchPostedAt(ctx.evm, ctx.deployment.hub, feedId, round);
+    const view = await loadChainView(ctx.evm, ctx.deployment.hub, accounts, postedAt);
     const findings = auditBatch(ctx.cfg, view, ctx.inbox.entries, { header: batch.header, reports: batch.reports });
 
     if (findings.length === 0) ctx.log(`round ${round}: batch ${batch.txHash} checks out`);

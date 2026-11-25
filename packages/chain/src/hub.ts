@@ -98,8 +98,17 @@ export function publicClient(net: Network): PublicClient {
  * fraud proof checks reports against the pinned key: a reporter that rotated its key must not
  * be accepted here and then fail on chain. `ChainView` is synchronous, so the reads happen
  * here, up front.
+ *
+ * Without `at`, activity is judged for a batch posted now (the sequencer's view). With `at`,
+ * the timestamp a batch was posted at, it is read from the hub's `isActiveAt`, the rule the
+ * fraud proof applies, so a watchtower auditing an older batch agrees with the hub.
  */
-export async function loadChainView(client: PublicClient, hub: Hex, accounts: readonly Hex[]): Promise<ChainView> {
+export async function loadChainView(
+  client: PublicClient,
+  hub: Hex,
+  accounts: readonly Hex[],
+  at?: bigint,
+): Promise<ChainView> {
   const keys = new Map<string, Uint8Array>();
   const active = new Set<string>();
   const minStake = await client.readContract({ address: hub, abi: auguryHubAbi, functionName: "minReporterStake" });
@@ -112,7 +121,11 @@ export async function loadChainView(client: PublicClient, hub: Hex, accounts: re
         client.readContract({ address: hub, abi: auguryHubAbi, functionName: "reporters", args: [account] }),
       ]);
       if (pinned.length > 2) keys.set(id, Uint8Array.from(Buffer.from(pinned.slice(2), "hex")));
-      if (isActiveNow({ stake, exitRequestedAt, activeSince, slashedAt }, minStake)) active.add(id);
+      const isActive =
+        at === undefined
+          ? isActiveNow({ stake, exitRequestedAt, activeSince, slashedAt }, minStake)
+          : await client.readContract({ address: hub, abi: auguryHubAbi, functionName: "isActiveAt", args: [account, at] });
+      if (isActive) active.add(id);
     }),
   );
 
@@ -120,6 +133,12 @@ export async function loadChainView(client: PublicClient, hub: Hex, accounts: re
     reporterKey: (a) => keys.get(a.toLowerCase()),
     isActive: (a) => active.has(a.toLowerCase()),
   };
+}
+
+/** The timestamp AuguryHub recorded when the batch for `feedId` and `round` was posted. */
+export async function batchPostedAt(client: PublicClient, hub: Hex, feedId: Hex, round: bigint): Promise<bigint> {
+  const [, , , postedAt] = await client.readContract({ address: hub, abi: auguryHubAbi, functionName: "batches", args: [feedId, round] });
+  return postedAt;
 }
 
 /** A reporter's record in AuguryHub (`reporters(address)`). */
