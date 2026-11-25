@@ -7,3 +7,4 @@ export * from "./shares.ts";
 export * from "./crypto.ts";
 export * from "./inbox.ts";
 export * from "./round.ts";
+export * from "./privatefeed.ts";

@@ -19,7 +19,7 @@ import type { MemberIndex, MemberShare, PartIndex } from "./shares.ts";
 export const MAX_POST_BYTES = 6144;
 
 const MAGIC = [0x41, 0x55, 0x47, 0x02] as const; // "AUG" + format version 2
-const KIND = { open: 1, report: 2, signature: 3, share: 4, delivery: 5 } as const;
+const KIND = { open: 1, report: 2, signature: 3, share: 4, delivery: 5, "private-value": 6, "epoch-key": 7 } as const;
 const ML_KEM_1024_PUBLIC_KEY = 1568;
 const X25519_PUBLIC_KEY = 32;
 const ML_DSA_87_SIGNATURE = 4627;
@@ -71,7 +71,30 @@ export interface DeliveryPost {
   envelope: Hex;
 }
 
-export type InboxPost = RoundOpen | SealedReportPost | SignaturePost | SharePost | DeliveryPost;
+/** A private feed's value, sealed with the feed's current QoreSeal epoch key (see privatefeed.ts). */
+export interface PrivateValuePost {
+  kind: "private-value";
+  feedId: Hex;
+  round: bigint;
+  blob: Hex;
+}
+
+/** A private feed's epoch key sealed to its subscribers. `round` carries the epoch number. */
+export interface EpochKeyPost {
+  kind: "epoch-key";
+  feedId: Hex;
+  round: bigint;
+  envelope: Hex;
+}
+
+export type InboxPost =
+  | RoundOpen
+  | SealedReportPost
+  | SignaturePost
+  | SharePost
+  | DeliveryPost
+  | PrivateValuePost
+  | EpochKeyPost;
 
 /** One inbox entry as read from the chain. */
 export interface InboxEntry {
@@ -133,6 +156,12 @@ export function encodePost(post: InboxPost): Uint8Array {
       break;
     case "delivery":
       body = concatBytes(Uint8Array.of(post.member), hexToBytes(post.envelope));
+      break;
+    case "private-value":
+      body = hexToBytes(post.blob);
+      break;
+    case "epoch-key":
+      body = hexToBytes(post.envelope);
       break;
   }
   const out = concatBytes(head, body);
@@ -197,6 +226,12 @@ export function decodePost(data: Uint8Array): InboxPost | undefined {
       if (m === undefined || body.length < 2) return undefined;
       return { kind: "delivery", feedId, round, member: m, envelope: bytesToHex(body.subarray(1)) };
     }
+    case KIND["private-value"]:
+      if (body.length === 0) return undefined;
+      return { kind: "private-value", feedId, round, blob: bytesToHex(body) };
+    case KIND["epoch-key"]:
+      if (body.length === 0) return undefined;
+      return { kind: "epoch-key", feedId, round, envelope: bytesToHex(body) };
     default:
       return undefined;
   }
