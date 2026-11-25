@@ -91,3 +91,8 @@ mkdirSync("receipts", { recursive: true });
 const file = `receipts/${rollupId}-${batchIndex}.json`;
 writeFileSync(file, `${JSON.stringify({ receipt, verification: { valid: check.valid, mode: check.mode, checks: check.checks } }, null, 2)}\n`);
 console.log(`saved ${file}`);
+if (!check.valid) {
+  // Never record an invalid receipt as evidence: fail so it cannot be mistaken for success.
+  console.log("the receipt did NOT verify; do not cite it in EVIDENCE.md");
+  process.exit(1);
+}
