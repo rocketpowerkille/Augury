@@ -141,7 +141,7 @@ flowchart LR
 | Hashing | SHA-256 | Report leaves and roots, seed-part commitments, feed ids. Matches the EVM's native `sha256` precompile, so the fraud proof can recompute roots cheaply |
 | Transactions | Hybrid secp256k1 + ML-DSA-87 | QoreChain's post-quantum transaction format |
 
-**Keys are registered on-chain with proof of possession.** AuguryHub refuses reports and batches signed by keys that `pqcKeyStatus` does not show as registered.
+**Keys are registered on-chain with proof of possession.** AuguryHub refuses batches signed by keys that `pqcKeyStatus` does not show as registered. A reporter's key is pinned from `pqcKeyStatus` when it starts staking, and its reports are always checked against that pinned key, so rotating a key later cannot turn an honest batch into a provable fraud (see T14 in [`THREAT_MODEL.md`](THREAT_MODEL.md)).
 
 **Domain separation.** Every signed message includes the chain ID, the AuguryHub address, the feed ID and the round number, so a signature cannot be replayed in another round, feed or deployment.
 
