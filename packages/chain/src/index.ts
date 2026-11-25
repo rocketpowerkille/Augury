@@ -6,4 +6,6 @@ export * from "./hub.ts";
 export * from "./kem.ts";
 export * from "./rollup.ts";
 export * from "./settlement.ts";
+export * from "./privatefeeds.ts";
 export { auguryHubAbi, auguryHubBytecode } from "./abi/auguryHub.ts";
+export { privateFeedsAbi, privateFeedsBytecode } from "./abi/privateFeeds.ts";

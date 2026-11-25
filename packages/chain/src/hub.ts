@@ -7,6 +7,7 @@ import {
   defineChain,
   encodeFunctionData,
   http,
+  type Abi,
   type Chain,
   type PublicClient,
 } from "viem";
@@ -225,15 +226,44 @@ export interface HubParams {
   maxReports: number;
 }
 
-/**
- * Deploy AuguryHub from `account`. Contract creation is refused inside a target-scoped
- * window, so this opens an unscoped window that admits exactly one transaction.
- */
+/** Deploy AuguryHub from `account`. */
 export async function deployAuguryHub(opts: {
   net: Network;
   account: UnifiedAccount;
   native: NativeSender;
   params: HubParams;
+}): Promise<{ address: Hex; txHash: Hex }> {
+  const p = opts.params;
+  return deployThroughWindow({
+    ...opts,
+    label: "AuguryHub",
+    abi: auguryHubAbi,
+    bytecode: auguryHubBytecode,
+    args: [
+      p.sequencer,
+      p.mldsaAlgorithmId,
+      p.minReporterStake,
+      p.minSequencerBond,
+      p.challengeWindow,
+      p.exitDelay,
+      p.minReports,
+      p.maxReports,
+    ],
+  });
+}
+
+/**
+ * Deploy a contract from `account`. Contract creation is refused inside a target-scoped
+ * window, so this opens an unscoped window that admits exactly one transaction.
+ */
+export async function deployThroughWindow(opts: {
+  net: Network;
+  account: UnifiedAccount;
+  native: NativeSender;
+  label: string;
+  abi: Abi;
+  bytecode: Hex;
+  args: readonly unknown[];
 }): Promise<{ address: Hex; txHash: Hex }> {
   const client = publicClient(opts.net);
   const wallet = createWalletClient({
@@ -241,17 +271,6 @@ export async function deployAuguryHub(opts: {
     chain: evmChain(opts.net),
     transport: http(opts.net.evmRpc),
   });
-  const p = opts.params;
-  const args = [
-    p.sequencer,
-    p.mldsaAlgorithmId,
-    p.minReporterStake,
-    p.minSequencerBond,
-    p.challengeWindow,
-    p.exitDelay,
-    p.minReports,
-    p.maxReports,
-  ] as const;
 
   const gas = 6_000_000n;
   const fees = await client.estimateFeesPerGas();
@@ -265,13 +284,13 @@ export async function deployAuguryHub(opts: {
       }),
     ],
     300_000n,
-    "augury: one-transaction window to deploy AuguryHub",
+    `augury: one-transaction window to deploy ${opts.label}`,
   );
   const nonce = await client.getTransactionCount({ address: wallet.account.address, blockTag: "pending" });
   const txHash = await wallet.deployContract({
-    abi: auguryHubAbi,
-    bytecode: auguryHubBytecode,
-    args,
+    abi: opts.abi,
+    bytecode: opts.bytecode,
+    args: opts.args,
     gas,
     nonce,
     maxFeePerGas: fees.maxFeePerGas,

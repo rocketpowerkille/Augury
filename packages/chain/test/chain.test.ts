@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { encodePost, FEEDS, type SignedReport } from "@augury/shared";
 import { deriveUnifiedAccount, evmToQor, qorechainRegistry, verifyProofOfPossession } from "@qorechain/sdk";
 import { openEvmWindowMessage } from "@qorechain/evm";
+import { decodeFunctionData } from "viem";
 import {
   auguryHubAbi,
   auguryRegistry,
@@ -16,6 +17,8 @@ import {
   parseAccountSequence,
   parseDeployment,
   postBatchCalldata,
+  privateFeedsAbi,
+  publishCalldata,
   pqcRegistrationMessage,
   registerKemKeyMessage,
   stakeCalldata,
@@ -294,5 +297,24 @@ describe("loadChainView", () => {
   it("judges activity at the batch's post time for the watchtower, as the hub does", async () => {
     assert.equal((await loadChainView(fakeClient, hub, [reporter], 100n)).isActive(reporter), true);
     assert.equal((await loadChainView(fakeClient, hub, [reporter], 200n)).isActive(reporter), false);
+  });
+});
+
+describe("PrivateFeeds calldata", () => {
+  it("encodes a publication that decodes back to the same fields", () => {
+    const publication = {
+      feedId: FEED,
+      round: 7n,
+      epoch: 3n,
+      commitment: `0x${"11".repeat(32)}` as const,
+      blobHash: `0x${"22".repeat(32)}` as const,
+    };
+    const signature = Uint8Array.of(9, 8, 7);
+    const data = publishCalldata("0x00000000000000000000000000000000000000aa", publication, signature);
+    const { functionName, args } = decodeFunctionData({ abi: privateFeedsAbi, data });
+    assert.equal(functionName, "publish");
+    const [publisher, ...rest] = args;
+    assert.equal(publisher.toLowerCase(), "0x00000000000000000000000000000000000000aa"); // viem returns it checksummed
+    assert.deepEqual(rest, [FEED, 7n, 3n, publication.commitment, publication.blobHash, "0x090807"]);
   });
 });
