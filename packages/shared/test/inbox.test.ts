@@ -86,4 +86,38 @@ describe("inbox posts", () => {
     badDealer[45] = 3;
     assert.equal(decodePost(badDealer), undefined);
   });
+
+  describe("two-dealer (version 3) posts", () => {
+    const layer1: RoundOpen = { ...open, dealer: 2, layer: 1, layers: 2 };
+
+    it("round-trip layered opens, deliveries and shares", () => {
+      const layer0: RoundOpen = { ...open, layer: 0, layers: 2 };
+      const delivery: InboxPost = { kind: "delivery", feedId: open.feedId, round: 3n, member: 1, envelope: "0xabcdef", layer: 1 };
+      const { shares } = splitSeed(new Uint8Array(32).fill(9), 3n);
+      const share = postFromShare(open.feedId, 3n, shares[0], 1);
+      for (const post of [layer0, layer1, delivery, share]) assert.deepEqual(decodePost(encodePost(post)), post);
+    });
+
+    it("keep single-dealer posts in the version 2 format, byte for byte", () => {
+      assert.equal(encodePost(open)[3], 0x02);
+      assert.equal(encodePost(layer1)[3], 0x03);
+      assert.equal(encodePost({ kind: "report", feedId: open.feedId, round: 1n, envelope: "0x00" })[3], 0x02);
+    });
+
+    it("reject malformed layered posts", () => {
+      const bytes = encodePost(layer1);
+      const head = 4 + 1 + 32 + 8;
+      const bad = (patch: (b: Uint8Array) => void) => {
+        const b = Uint8Array.from(bytes);
+        patch(b);
+        return decodePost(b);
+      };
+      assert.equal(bad((b) => (b[head] = 2)), undefined); // no layer 2
+      assert.equal(bad((b) => (b[head + 1] = 1)), undefined); // layer 1 of a one-layer round
+      assert.equal(bad((b) => (b[head + 1] = 3)), undefined); // three layers
+      const report = encodePost({ kind: "report", feedId: open.feedId, round: 1n, envelope: "0x00" });
+      report[3] = 0x03; // reports have no layered form
+      assert.equal(decodePost(report), undefined);
+    });
+  });
 });

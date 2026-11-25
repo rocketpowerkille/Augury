@@ -1,6 +1,6 @@
 import { bytesEqual, bytesToHex, hexToBytes, type Hex } from "./bytes.ts";
 import { openReport, roundKeys, verifyReport, type SignedReport } from "./crypto.ts";
-import { shareFromPost, type InboxEntry, type RoundOpen, type SharePost } from "./inbox.ts";
+import { shareFromPost, type InboxEntry, type Layer, type RoundOpen, type SharePost } from "./inbox.ts";
 import { median } from "./median.ts";
 import { reportMessage, reportRoot, type BatchHeader, type Domain } from "./messages.ts";
 import { combineShares, verifyShare, type MemberIndex, type MemberShare } from "./shares.ts";
@@ -55,6 +55,7 @@ export interface Equivocation {
 export interface EarlyShare {
   seq: bigint;
   member: MemberIndex;
+  layer: Layer;
 }
 
 interface Findings {
@@ -63,12 +64,55 @@ interface Findings {
   earlyShares: EarlyShare[];
 }
 
+/**
+ * `open` is the round's layer 0 open (its only open in a single-dealer round); `outer` is the
+ * layer 1 open of a two-dealer round.
+ */
+type Opened = { open: RoundOpen; outer?: RoundOpen };
+
 export type RoundOutcome =
   | { status: "no-open" }
-  | ({ status: "awaiting-shares"; open: RoundOpen } & Pick<Findings, "earlyShares">)
-  | ({ status: "bad-round-key"; open: RoundOpen } & Pick<Findings, "earlyShares">)
-  | ({ status: "too-few-reports"; open: RoundOpen; reports: SignedReport[] } & Findings)
-  | ({ status: "ready"; open: RoundOpen; header: BatchHeader; reports: SignedReport[] } & Findings);
+  | ({ status: "awaiting-shares" } & Opened & Pick<Findings, "earlyShares">)
+  | ({ status: "bad-round-key" } & Opened & Pick<Findings, "earlyShares">)
+  | ({ status: "too-few-reports"; reports: SignedReport[] } & Opened & Findings)
+  | ({ status: "ready"; header: BatchHeader; reports: SignedReport[] } & Opened & Findings);
+
+/** The layer an open, share or delivery belongs to; posts without one are layer 0. */
+export const layerOf = (post: { layer?: Layer }): Layer => post.layer ?? 0;
+
+/**
+ * The opens of a round, in the order the round rules accept them. Layer 0: the first open
+ * posted by the committee member it names as dealer. Layer 1 (only when the layer 0 open
+ * declares `layers: 2`): the first layer 1 open posted by a different member, named as its
+ * dealer, with the same close height and posted no later than the close.
+ */
+export function findOpens(
+  cfg: RoundConfig,
+  entries: readonly InboxEntry[],
+  feedId: Hex,
+  round: bigint,
+): { open: RoundOpen; openEntry: InboxEntry; outer?: RoundOpen; outerEntry?: InboxEntry } | "no-open" | "awaiting-outer" {
+  const forRound = [...entries]
+    .filter((e) => same(e.post.feedId, feedId) && e.post.round === round && e.post.kind === "open")
+    .sort((a, b) => (a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0));
+  const openEntry = forRound.find(
+    (e) => e.post.kind === "open" && layerOf(e.post) === 0 && same(e.poster, cfg.committee[e.post.dealer]),
+  );
+  if (!openEntry || openEntry.post.kind !== "open") return "no-open";
+  const open = openEntry.post;
+  if ((open.layers ?? 1) === 1) return { open, openEntry };
+  const outerEntry = forRound.find(
+    (e) =>
+      e.post.kind === "open" &&
+      layerOf(e.post) === 1 &&
+      e.post.dealer !== open.dealer &&
+      same(e.poster, cfg.committee[e.post.dealer]) &&
+      e.post.closeHeight === open.closeHeight &&
+      e.height <= open.closeHeight,
+  );
+  if (!outerEntry || outerEntry.post.kind !== "open") return "awaiting-outer";
+  return { open, openEntry, outer: outerEntry.post, outerEntry };
+}
 
 const same = (a: Hex, b: Hex) => a.toLowerCase() === b.toLowerCase();
 
@@ -83,37 +127,47 @@ export function processRound(
     .filter((e) => same(e.post.feedId, feedId) && e.post.round === round)
     .sort((a, b) => (a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0));
 
-  // 1. The round opens with the first open posted by its dealer.
-  const openEntry = forRound.find(
-    (e) => e.post.kind === "open" && same(e.poster, cfg.committee[e.post.dealer]),
-  );
-  if (!openEntry || openEntry.post.kind !== "open") return { status: "no-open" };
-  const open = openEntry.post;
+  // 1. The round opens with its layer 0 open, and in a two-dealer round also its layer 1 open.
+  const found = findOpens(cfg, entries, feedId, round);
+  if (found === "no-open" || found === "awaiting-outer") return { status: "no-open" };
+  const { open, openEntry, outer, outerEntry } = found;
+  const opened: Opened = outer ? { open, outer } : { open };
+  const layerOpens: RoundOpen[] = outer ? [open, outer] : [open];
 
-  // 2. Shares: only from the member they belong to, only after the round closed.
+  // 2. Shares, per layer: only from the member they belong to, only after the round closed.
   const earlyShares: EarlyShare[] = [];
-  const validShares = new Map<MemberIndex, MemberShare>();
+  const validShares = layerOpens.map(() => new Map<MemberIndex, MemberShare>());
   for (const e of forRound) {
     if (e.post.kind !== "share" || !same(e.poster, cfg.committee[e.post.member])) continue;
+    const layer = layerOf(e.post);
+    if (layer >= layerOpens.length) continue;
     if (e.height <= open.closeHeight) {
-      earlyShares.push({ seq: e.seq, member: e.post.member });
+      earlyShares.push({ seq: e.seq, member: e.post.member, layer });
       continue;
     }
     const share = shareFromPost(e.post as SharePost);
-    if (!validShares.has(share.member) && verifyShare(share, round, open.commitments)) {
-      validShares.set(share.member, share);
+    const valid = validShares[layer]!;
+    if (!valid.has(share.member) && verifyShare(share, round, layerOpens[layer]!.commitments)) {
+      valid.set(share.member, share);
     }
   }
-  if (validShares.size < 2) return { status: "awaiting-shares", open, earlyShares };
+  if (validShares.some((v) => v.size < 2)) return { status: "awaiting-shares", ...opened, earlyShares };
 
-  const keys = roundKeys(combineShares([...validShares.values()], round, open.commitments));
-  if (
-    !bytesEqual(keys.mlkemPublicKey, hexToBytes(open.mlkemPublicKey)) ||
-    !bytesEqual(keys.x25519PublicKey, hexToBytes(open.x25519PublicKey))
-  ) {
-    // The dealer published a public key that does not match the committed seed.
-    return { status: "bad-round-key", open, earlyShares };
+  // Rebuild each layer's key; each must match the public key its dealer published.
+  const layerKeys = layerOpens.map((o, i) => roundKeys(combineShares([...validShares[i]!.values()], round, o.commitments)));
+  const keyMismatch = layerOpens.some(
+    (o, i) =>
+      !bytesEqual(layerKeys[i]!.mlkemPublicKey, hexToBytes(o.mlkemPublicKey)) ||
+      !bytesEqual(layerKeys[i]!.x25519PublicKey, hexToBytes(o.x25519PublicKey)),
+  );
+  if (keyMismatch) {
+    // A dealer published a public key that does not match its committed seed.
+    return { status: "bad-round-key", ...opened, earlyShares };
   }
+  const keys = layerKeys[0]!;
+  const outerKeys = layerKeys[1];
+  // Reports count only once every open of the round is on the inbox.
+  const openedAt = outerEntry && outerEntry.seq > openEntry.seq ? outerEntry.seq : openEntry.seq;
 
   // 3. Reports, in inbox order.
   const rejected: Rejection[] = [];
@@ -126,7 +180,7 @@ export function processRound(
 
   for (const e of forRound) {
     if (e.post.kind !== "report") continue;
-    if (e.seq < openEntry.seq) {
+    if (e.seq < openedAt) {
       reject(e, "before-open");
       continue;
     }
@@ -147,6 +201,7 @@ export function processRound(
           sealChainId: cfg.sealChainId,
           domain: cfg.domain,
           keys,
+          ...(outerKeys ? { outerKeys } : {}),
           envelope: hexToBytes(e.post.envelope),
           feedId,
           round,
@@ -195,7 +250,7 @@ export function processRound(
   const reports = [...included.values()];
   const findings = { rejected, equivocations, earlyShares };
   if (reports.length < cfg.minReports) {
-    return { status: "too-few-reports", open, reports, ...findings };
+    return { status: "too-few-reports", ...opened, reports, ...findings };
   }
 
   const header: BatchHeader = {
@@ -205,5 +260,5 @@ export function processRound(
     reportRoot: bytesToHex(reportRoot(cfg.domain, reports)),
     reportCount: reports.length,
   };
-  return { status: "ready", open, header, reports, ...findings };
+  return { status: "ready", ...opened, header, reports, ...findings };
 }

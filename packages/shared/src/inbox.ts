@@ -13,12 +13,22 @@ import type { MemberIndex, MemberShare, PartIndex } from "./shares.ts";
  *   other in the inbox: the sealed report, then its signature. They count if posted after
  *   the open and at or before `closeHeight`.
  * - Shares count only if posted after `closeHeight`; an earlier share is an early release.
+ *
+ * Two-dealer rounds (format version 3): the round's dealer opens layer 0 and declares
+ * `layers: 2`; a second member then opens layer 1 with its own seed and the same close
+ * height. Reports are sealed to the layer 0 key and then to the layer 1 key, so opening one
+ * needs both seeds and no single member can open reports early. Deliveries and shares name
+ * the layer they belong to. Posts without layer fields are the original single-dealer
+ * format (version 2) and still decode.
  */
 
 /** The chain's limit on one qledger-v1 post. */
 export const MAX_POST_BYTES = 6144;
 
-const MAGIC = [0x41, 0x55, 0x47, 0x02] as const; // "AUG" + format version 2
+const MAGIC = [0x41, 0x55, 0x47] as const; // "AUG"
+/** Version 2: single-dealer rounds. Version 3: opens, deliveries and shares carry a layer. */
+const V2 = 0x02;
+const V3 = 0x03;
 const KIND = { open: 1, report: 2, signature: 3, share: 4, delivery: 5, "private-value": 6, "epoch-key": 7 } as const;
 const ML_KEM_1024_PUBLIC_KEY = 1568;
 const X25519_PUBLIC_KEY = 32;
@@ -36,7 +46,13 @@ export interface RoundOpen {
   x25519PublicKey: Hex;
   /** Commitments to seed parts 0, 1 and 2. */
   commitments: [Hex, Hex, Hex];
+  /** Which key of a two-dealer round this opens (absent: a single-dealer round). */
+  layer?: Layer;
+  /** On a layer 0 open: how many layers the round has, 1 or 2 (absent: 1). */
+  layers?: 1 | 2;
 }
+
+export type Layer = 0 | 1;
 
 /** A report's signed message (salt included), sealed to the round key. */
 export interface SealedReportPost {
@@ -59,6 +75,8 @@ export interface SharePost {
   feedId: Hex;
   round: bigint;
   member: MemberIndex;
+  /** The layer whose seed this share is part of (absent: layer 0 of a single-dealer round). */
+  layer?: Layer;
   parts: [{ index: PartIndex; value: Hex }, { index: PartIndex; value: Hex }];
 }
 
@@ -68,6 +86,8 @@ export interface DeliveryPost {
   feedId: Hex;
   round: bigint;
   member: MemberIndex;
+  /** The layer whose seed this delivery carries (absent: layer 0 of a single-dealer round). */
+  layer?: Layer;
   envelope: Hex;
 }
 
@@ -124,9 +144,18 @@ function fixed(hex: Hex, length: number, name: string): Uint8Array {
   return bytes;
 }
 
+/** Whether a post uses the layered (version 3) format. */
+function layered(post: InboxPost): boolean {
+  if (post.kind === "open") return post.layer !== undefined || post.layers !== undefined;
+  if (post.kind === "share" || post.kind === "delivery") return post.layer !== undefined;
+  return false;
+}
+
 export function encodePost(post: InboxPost): Uint8Array {
+  const v3 = layered(post);
   const head = concatBytes(
     Uint8Array.from(MAGIC),
+    Uint8Array.of(v3 ? V3 : V2),
     Uint8Array.of(KIND[post.kind]),
     fixed(post.feedId, 32, "feedId"),
     u64(post.round),
@@ -135,6 +164,7 @@ export function encodePost(post: InboxPost): Uint8Array {
   switch (post.kind) {
     case "open":
       body = concatBytes(
+        v3 ? Uint8Array.of(layerByte(post.layer ?? 0), post.layers ?? 1) : new Uint8Array(0),
         Uint8Array.of(post.dealer),
         u64(post.closeHeight),
         fixed(post.mlkemPublicKey, ML_KEM_1024_PUBLIC_KEY, "mlkemPublicKey"),
@@ -150,12 +180,17 @@ export function encodePost(post: InboxPost): Uint8Array {
       break;
     case "share":
       body = concatBytes(
+        v3 ? Uint8Array.of(layerByte(post.layer!)) : new Uint8Array(0),
         Uint8Array.of(post.member),
         ...post.parts.map((p) => concatBytes(Uint8Array.of(p.index), fixed(p.value, 32, "part"))),
       );
       break;
     case "delivery":
-      body = concatBytes(Uint8Array.of(post.member), hexToBytes(post.envelope));
+      body = concatBytes(
+        v3 ? Uint8Array.of(layerByte(post.layer!)) : new Uint8Array(0),
+        Uint8Array.of(post.member),
+        hexToBytes(post.envelope),
+      );
       break;
     case "private-value":
       body = hexToBytes(post.blob);
@@ -169,16 +204,41 @@ export function encodePost(post: InboxPost): Uint8Array {
   return out;
 }
 
+function layerByte(layer: Layer): number {
+  if (layer !== 0 && layer !== 1) throw new Error(`layer must be 0 or 1, not ${String(layer)}`);
+  return layer;
+}
+
 /** Parse an inbox payload. Returns `undefined` for anything that is not a valid Augury post. */
 export function decodePost(data: Uint8Array): InboxPost | undefined {
   const HEAD = 4 + 1 + 32 + 8;
   if (data.length < HEAD || MAGIC.some((b, i) => data[i] !== b)) return undefined;
+  if (data[3] !== V2 && data[3] !== V3) return undefined;
+  const v3 = data[3] === V3;
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const kind = data[4];
   const feedId = bytesToHex(data.subarray(5, 37));
   const round = view.getBigUint64(37);
-  const body = data.subarray(HEAD);
   const member = (v: number | undefined): MemberIndex | undefined => (v === 0 || v === 1 || v === 2 ? v : undefined);
+  const layerOf = (v: number | undefined): Layer | undefined => (v === 0 || v === 1 ? v : undefined);
+  // Version 3 opens start with (layer, layers); deliveries and shares with the layer.
+  let body = data.subarray(HEAD);
+  let layer: Layer | undefined;
+  let layers: 1 | 2 | undefined;
+  if (v3) {
+    if (kind !== KIND.open && kind !== KIND.share && kind !== KIND.delivery) return undefined;
+    layer = layerOf(body[0]);
+    if (layer === undefined) return undefined;
+    if (kind === KIND.open) {
+      const n = body[1];
+      if (n !== 1 && n !== 2) return undefined;
+      if (layer === 1 && n !== 2) return undefined;
+      layers = n;
+      body = body.subarray(2);
+    } else {
+      body = body.subarray(1);
+    }
+  }
 
   switch (kind) {
     case KIND.open: {
@@ -196,6 +256,7 @@ export function decodePost(data: Uint8Array): InboxPost | undefined {
         mlkemPublicKey: take(ML_KEM_1024_PUBLIC_KEY),
         x25519PublicKey: take(X25519_PUBLIC_KEY),
         commitments: [take(32), take(32), take(32)],
+        ...(v3 ? { layer: layer!, layers: layers! } : {}),
       };
     }
     case KIND.report:
@@ -219,12 +280,13 @@ export function decodePost(data: Uint8Array): InboxPost | undefined {
           { index: i0, value: bytesToHex(body.subarray(2, 34)) },
           { index: i1, value: bytesToHex(body.subarray(35, 67)) },
         ],
+        ...(v3 ? { layer: layer! } : {}),
       };
     }
     case KIND.delivery: {
       const m = member(body[0]);
       if (m === undefined || body.length < 2) return undefined;
-      return { kind: "delivery", feedId, round, member: m, envelope: bytesToHex(body.subarray(1)) };
+      return { kind: "delivery", feedId, round, member: m, envelope: bytesToHex(body.subarray(1)), ...(v3 ? { layer: layer! } : {}) };
     }
     case KIND["private-value"]:
       if (body.length === 0) return undefined;
@@ -248,7 +310,7 @@ export function shareFromPost(post: SharePost): MemberShare {
   };
 }
 
-export function postFromShare(feedId: Hex, round: bigint, share: MemberShare): SharePost {
+export function postFromShare(feedId: Hex, round: bigint, share: MemberShare, layer?: Layer): SharePost {
   return {
     kind: "share",
     feedId,
@@ -258,5 +320,6 @@ export function postFromShare(feedId: Hex, round: bigint, share: MemberShare): S
       { index: share.parts[0].index, value: bytesToHex(share.parts[0].value) },
       { index: share.parts[1].index, value: bytesToHex(share.parts[1].value) },
     ],
+    ...(layer !== undefined ? { layer } : {}),
   };
 }

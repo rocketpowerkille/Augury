@@ -38,6 +38,8 @@ export const ML_DSA_87_PUBLIC_KEY_LENGTH = 2592;
 
 /** QoreSeal purpose string for sealed reports. */
 export const REPORT_SEAL_PURPOSE = "augury-report";
+/** QoreSeal purpose string for the outer seal of a two-dealer round's report. */
+export const REPORT_OUTER_SEAL_PURPOSE = "augury-report-outer";
 
 export interface SignedReport extends Report {
   signature: Uint8Array;
@@ -115,6 +117,8 @@ export interface SealReportArgs {
   sealChainId: string;
   domain: Domain;
   recipient: SealRecipient;
+  /** The layer 1 round key of a two-dealer round: the sealed report is sealed again to it. */
+  outer?: SealRecipient;
   report: Report;
 }
 
@@ -124,20 +128,26 @@ export interface SealReportArgs {
  * signature alone is 4,627. The sealed salt keeps the public signature from revealing the
  * price.
  */
-export function sealReport({ sealChainId, domain, recipient, report }: SealReportArgs): Uint8Array {
-  return seal({
+export function sealReport({ sealChainId, domain, recipient, outer, report }: SealReportArgs): Uint8Array {
+  const aad = reportAad(domain, report.feedId, report.round);
+  const inner = seal({
     chainId: sealChainId,
     purpose: REPORT_SEAL_PURPOSE,
     recipients: [recipient],
     plaintext: reportMessage(domain, report),
-    aad: reportAad(domain, report.feedId, report.round),
+    aad,
   });
+  if (!outer) return inner;
+  // Two-dealer round: opening the report needs the layer 1 key, then the layer 0 key.
+  return seal({ chainId: sealChainId, purpose: REPORT_OUTER_SEAL_PURPOSE, recipients: [outer], plaintext: inner, aad });
 }
 
 export interface OpenReportArgs {
   sealChainId: string;
   domain: Domain;
   keys: SealKeyPair;
+  /** The layer 1 round key of a two-dealer round; the envelope's outer seal is opened with it first. */
+  outerKeys?: SealKeyPair;
   envelope: Uint8Array;
   /** The feed and round this envelope was posted for. */
   feedId: Report["feedId"];
@@ -150,12 +160,16 @@ export interface OpenReportArgs {
  * report's signature post and check it with `verifyReport`.
  */
 export function openReport(args: OpenReportArgs): Report {
+  const aad = reportAad(args.domain, args.feedId, args.round);
+  const inner = args.outerKeys
+    ? open({ chainId: args.sealChainId, purpose: REPORT_OUTER_SEAL_PURPOSE, envelope: args.envelope, keys: args.outerKeys, aad })
+    : args.envelope;
   const plaintext = open({
     chainId: args.sealChainId,
     purpose: REPORT_SEAL_PURPOSE,
-    envelope: args.envelope,
+    envelope: inner,
     keys: args.keys,
-    aad: reportAad(args.domain, args.feedId, args.round),
+    aad,
   });
   if (plaintext.length !== REPORT_MESSAGE_LENGTH) throw new Error("sealed report has the wrong length");
   const report = decodeReportMessage(args.domain, plaintext);
