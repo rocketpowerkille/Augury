@@ -4,3 +4,4 @@ export { runCommittee } from "./roles/committee.ts";
 export { runReporter, REPORTABLE_FEEDS } from "./roles/reporter.ts";
 export { runSequencer } from "./roles/sequencer.ts";
 export { runWatchtower } from "./roles/watchtower.ts";
+export { ReportBook, type ReportPosts } from "./reportbook.ts";
