@@ -40,6 +40,7 @@ const { values } = parseArgs({
     "sequencer-bond-qor": { type: "string", default: "10" },
     "challenge-window": { type: "string", default: "3600" },
     "exit-delay": { type: "string", default: "7200" },
+    "activity-grace": { type: "string", default: "600" },
     "min-reports": { type: "string", default: "3" },
     "max-reports": { type: "string", default: "16" },
     out: { type: "string", default: "deployments/testnet.json" },
@@ -68,6 +69,7 @@ const params: HubParams = {
   minSequencerBond: BigInt(values["sequencer-bond-qor"]) * QOR,
   challengeWindow: BigInt(values["challenge-window"]),
   exitDelay: BigInt(values["exit-delay"]),
+  activityGrace: BigInt(values["activity-grace"]),
   minReports: Number(values["min-reports"]),
   maxReports: Number(values["max-reports"]),
 };

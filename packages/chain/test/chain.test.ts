@@ -18,6 +18,7 @@ import {
   parseAccountSequence,
   parseDeployment,
   postBatchCalldata,
+  postedBatches,
   privateFeedsAbi,
   publishCalldata,
   pqcRegistrationMessage,
@@ -339,5 +340,47 @@ describe("EVM window reuse", () => {
     assert.equal(windowAdmits({ ...live, live: false }, hub, 500n), false);
     assert.equal(windowAdmits({ ...live, remainingTxs: 0n }, hub, 500n), false);
     assert.equal(windowAdmits({ ...live, remainingValue: 499n }, hub, 500n), false);
+  });
+});
+
+describe("postedBatches", () => {
+  const hub = "0x00000000000000000000000000000000000000bb" as const;
+  const r = { ...report, signature: Uint8Array.of(1, 2, 3) };
+  const tuple = {
+    reporter: r.reporter,
+    price: r.price,
+    observedAt: r.observedAt,
+    salt: r.salt,
+    signature: "0x010203" as const,
+  };
+  const log = {
+    transactionHash: `0x${"aa".repeat(32)}` as const,
+    blockNumber: 7n,
+    args: {
+      feedId: FEED,
+      round: r.round,
+      price: r.price,
+      reportRoot: `0x${"cc".repeat(32)}` as const,
+      reportCount: 1,
+      reports: [tuple],
+    },
+  };
+  // A batch relayed through another contract: the transaction's input is not a postBatch call.
+  const relayed = {
+    async getContractEvents() {
+      return [log];
+    },
+    async getTransaction() {
+      return { input: "0xdeadbeef00000000" };
+    },
+  } as unknown as Parameters<typeof postedBatches>[0];
+
+  /** Regression: a batch posted through a contract made every watchtower tick throw. */
+  it("reads a relayed batch's reports from the event, not the transaction input", async () => {
+    const batches = await postedBatches(relayed, hub, 0n);
+    assert.equal(batches.length, 1);
+    assert.equal(batches[0]!.header.round, r.round);
+    assert.equal(batches[0]!.reports[0]!.reporter, r.reporter.toLowerCase());
+    assert.deepEqual(batches[0]!.reports[0]!.signature, Uint8Array.of(1, 2, 3));
   });
 });

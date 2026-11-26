@@ -3,7 +3,6 @@ import { evmWindowCost, evmWindowStatus, openEvmWindowMessage } from "@qorechain
 import {
   createPublicClient,
   createWalletClient,
-  decodeFunctionData,
   defineChain,
   encodeFunctionData,
   http,
@@ -150,7 +149,12 @@ export interface StakerRecord {
   slashedAt: bigint;
 }
 
-/** Whether a reporter counts as active for a batch posted now, by the same rule as `isActiveAt`. */
+/**
+ * Whether the sequencer should include a reporter in a batch it posts now. Stricter than the
+ * hub's `isActiveAt`: a reporter that has asked to exit or been slashed is left out at once,
+ * although the hub counts it for `activityGrace` more seconds, so the sequencer never includes
+ * a report the hub could call inactive.
+ */
 export function isActiveNow(s: StakerRecord, minStake: bigint): boolean {
   return s.stake >= minStake && s.activeSince !== 0n && s.exitRequestedAt === 0n && s.slashedAt === 0n;
 }
@@ -174,39 +178,29 @@ export interface PostedBatchOnChain {
 }
 
 /**
- * Every batch posted since `fromBlock`. The reports come from the transaction's calldata,
- * which AuguryHub requires to carry them, so every batch can be checked and challenged.
+ * Every batch posted since `fromBlock`, rebuilt from AuguryHub's `BatchPosted` events, which
+ * carry the batch's signed reports. Reading the logs rather than the transaction input means a
+ * batch relayed through another contract is seen and can be challenged like any other.
  */
 export async function postedBatches(client: PublicClient, hub: Hex, fromBlock: bigint): Promise<PostedBatchOnChain[]> {
   const logs = await client.getContractEvents({ address: hub, abi: auguryHubAbi, eventName: "BatchPosted", fromBlock });
-  const out: PostedBatchOnChain[] = [];
-  for (const log of logs) {
-    const tx = await client.getTransaction({ hash: log.transactionHash });
-    const call = decodeFunctionData({ abi: auguryHubAbi, data: tx.input });
-    if (call.functionName !== "postBatch") continue;
-    const [feedId, round, price, reports] = call.args;
-    out.push({
+  return logs.map((log) => {
+    const { feedId, round, price, reportRoot, reportCount, reports } = log.args;
+    return {
       txHash: log.transactionHash,
       blockNumber: log.blockNumber,
-      header: {
-        feedId,
-        round,
-        price,
-        reportRoot: log.args.reportRoot!,
-        reportCount: Number(log.args.reportCount!),
-      },
-      reports: reports.map((r) => ({
-        feedId,
-        round,
+      header: { feedId: feedId!, round: round!, price: price!, reportRoot: reportRoot!, reportCount: Number(reportCount!) },
+      reports: reports!.map((r) => ({
+        feedId: feedId!,
+        round: round!,
         reporter: r.reporter.toLowerCase() as Hex,
         price: r.price,
         observedAt: r.observedAt,
         salt: r.salt,
         signature: hexToBytes(r.signature),
       })),
-    });
-  }
-  return out;
+    };
+  });
 }
 
 // ------------------------------------------------------------------------------------------
@@ -222,6 +216,8 @@ export interface HubParams {
   /** Seconds. */
   challengeWindow: bigint;
   exitDelay: bigint;
+  /** Seconds an exit or slash waits before it makes a reporter inactive; exitDelay >= challengeWindow + this. */
+  activityGrace: bigint;
   minReports: number;
   maxReports: number;
 }
@@ -246,6 +242,7 @@ export async function deployAuguryHub(opts: {
       p.minSequencerBond,
       p.challengeWindow,
       p.exitDelay,
+      p.activityGrace,
       p.minReports,
       p.maxReports,
     ],

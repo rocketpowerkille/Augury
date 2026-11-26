@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, Vm} from "forge-std/Test.sol";
 import {AuguryHub} from "../src/AuguryHub.sol";
 import {MockQorePQC} from "./mocks/MockQorePQC.sol";
 
@@ -17,6 +17,7 @@ contract AuguryHubTest is Test {
     bytes32 constant FEED = 0x4bb79407dfad9e433ad54bfd5353fe075f319ef31887ca79b4b5b54a584bb1ad;
     uint64 constant WINDOW = 1 hours;
     uint64 constant EXIT_DELAY = 2 hours;
+    uint64 constant GRACE = 10 minutes;
     uint256 constant MIN_STAKE = 1 ether;
     uint256 constant MIN_BOND = 10 ether;
 
@@ -35,7 +36,7 @@ contract AuguryHubTest is Test {
 
         deployCodeTo(
             "AuguryHub.sol:AuguryHub",
-            abi.encode(sequencer, ALG, MIN_STAKE, MIN_BOND, WINDOW, EXIT_DELAY, uint32(3), uint32(16)),
+            abi.encode(sequencer, ALG, MIN_STAKE, MIN_BOND, WINDOW, EXIT_DELAY, GRACE, uint32(3), uint32(16)),
             HUB_ADDRESS
         );
         hub = AuguryHub(HUB_ADDRESS);
@@ -170,11 +171,13 @@ contract AuguryHubTest is Test {
 
     function test_RejectsBadConfig() public {
         vm.expectRevert(AuguryHub.InvalidConfig.selector);
-        new AuguryHub(sequencer, ALG, MIN_STAKE, MIN_BOND, WINDOW, WINDOW - 1, 3, 16);
+        new AuguryHub(sequencer, ALG, MIN_STAKE, MIN_BOND, WINDOW, WINDOW - 1, 0, 3, 16);
         vm.expectRevert(AuguryHub.InvalidConfig.selector);
-        new AuguryHub(sequencer, ALG, MIN_STAKE, MIN_BOND, WINDOW, EXIT_DELAY, 5, 4);
+        new AuguryHub(sequencer, ALG, MIN_STAKE, MIN_BOND, WINDOW, WINDOW + GRACE - 1, GRACE, 3, 16);
         vm.expectRevert(AuguryHub.InvalidConfig.selector);
-        new AuguryHub(address(0), ALG, MIN_STAKE, MIN_BOND, WINDOW, EXIT_DELAY, 3, 16);
+        new AuguryHub(sequencer, ALG, MIN_STAKE, MIN_BOND, WINDOW, EXIT_DELAY, GRACE, 5, 4);
+        vm.expectRevert(AuguryHub.InvalidConfig.selector);
+        new AuguryHub(address(0), ALG, MIN_STAKE, MIN_BOND, WINDOW, EXIT_DELAY, GRACE, 3, 16);
     }
 
     function test_StakeRequiresRegisteredKey() public {
@@ -220,7 +223,8 @@ contract AuguryHubTest is Test {
         address payable to = payable(makeAddr("payout"));
 
         hub.requestExit(r, _sign(r, hub.exitMessage(hub.REPORTER_EXIT_TAG(), r, 0)));
-        assertFalse(hub.isActiveAt(r, uint64(block.timestamp)));
+        assertTrue(hub.isActiveAt(r, uint64(block.timestamp + GRACE - 1))); // still in the grace
+        assertFalse(hub.isActiveAt(r, uint64(block.timestamp + GRACE)));
 
         bytes memory sig = _sign(r, hub.withdrawMessage(hub.REPORTER_WITHDRAW_TAG(), r, to, 1));
         vm.expectRevert(AuguryHub.ExitNotReady.selector);
@@ -374,6 +378,28 @@ contract AuguryHubTest is Test {
         assertEq(round, 1);
     }
 
+    /// Regression: a batch relayed through a contract left its reports only in the inner call,
+    /// so a watchtower decoding the transaction input could not see or challenge it.
+    function test_RelayedBatchEmitsItsReports() public {
+        AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
+        Relay relay = new Relay();
+        bytes memory sig = _batchSig(1, rs, 999);
+        vm.recordLogs();
+        relay.post(hub, FEED, 1, 999, rs, sig);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 1);
+        assertEq(logs[0].topics[0], AuguryHub.BatchPosted.selector);
+        (int256 price,,, AuguryHub.SignedReport[] memory emitted) =
+            abi.decode(logs[0].data, (int256, bytes32, uint32, AuguryHub.SignedReport[]));
+        assertEq(price, 999);
+        assertEq(emitted.length, 3);
+        assertEq(emitted[1].reporter, rs[1].reporter);
+        assertEq(emitted[1].signature, rs[1].signature);
+        // The reports from the log are enough to prove the lie.
+        hub.challengeBatch(FEED, 1, emitted, payable(challenger));
+        assertEq(challenger.balance, MIN_BOND / 2);
+    }
+
     function test_ChallengeHonestBatchReverts() public {
         AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
         _post(1, rs, 101);
@@ -414,7 +440,7 @@ contract AuguryHubTest is Test {
     function test_ChallengeCatchesInactiveReporter() public {
         address r = reporterList[0];
         hub.requestExit(r, _sign(r, hub.exitMessage(hub.REPORTER_EXIT_TAG(), r, 0)));
-        vm.warp(block.timestamp + 1);
+        vm.warp(block.timestamp + GRACE); // the exit has taken effect
         AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
         _post(1, rs, 101);
         vm.prank(challenger);
@@ -513,7 +539,8 @@ contract AuguryHubTest is Test {
         vm.warp(block.timestamp + 1);
 
         hub.reportEquivocation(FEED, 7, _report(7, 0, 100), _report(7, 0, 200), payable(challenger));
-        assertFalse(hub.isActiveAt(reporterList[0], uint64(block.timestamp)));
+        assertTrue(hub.isActiveAt(reporterList[0], uint64(block.timestamp + GRACE - 1)));
+        assertFalse(hub.isActiveAt(reporterList[0], uint64(block.timestamp + GRACE)));
 
         vm.expectRevert(AuguryHub.NoFraud.selector);
         hub.challengeBatch(FEED, 1, rs, payable(challenger));
@@ -522,6 +549,28 @@ contract AuguryHubTest is Test {
 
     /// Regression: a reporter in an honest batch rotated its ML-DSA key on chain, so its report
     /// no longer verified against the current key and the honest sequencer could be slashed.
+    /// Regression: a reporter in an honest batch front-ran the post with `requestExit`, so it
+    /// counted as inactive at the post time and the honest sequencer could be slashed.
+    function test_ExitInTheSameBlockAsThePostIsNotFraud() public {
+        AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
+        address r = reporterList[0];
+        hub.requestExit(r, _sign(r, hub.exitMessage(hub.REPORTER_EXIT_TAG(), r, 0)));
+        _post(1, rs, 101); // same block
+        vm.expectRevert(AuguryHub.NoFraud.selector);
+        hub.challengeBatch(FEED, 1, rs, payable(challenger));
+        assertEq(hub.sequencerBond(), MIN_BOND);
+    }
+
+    /// Regression: the same race with a self-inflicted equivocation slash.
+    function test_SlashInTheSameBlockAsThePostIsNotFraud() public {
+        AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
+        hub.reportEquivocation(FEED, 9, _report(9, 0, 1), _report(9, 0, 2), payable(challenger));
+        _post(1, rs, 101); // same block
+        vm.expectRevert(AuguryHub.NoFraud.selector);
+        hub.challengeBatch(FEED, 1, rs, payable(challenger));
+        assertEq(hub.sequencerBond(), MIN_BOND);
+    }
+
     function test_RotatingAKeyLaterDoesNotMakeAnHonestBatchFraudulent() public {
         AuguryHub.SignedReport[] memory rs = _reports(1, _prices3(100, 102, 101));
         _post(1, rs, 101);
@@ -640,5 +689,19 @@ contract AuguryHubTest is Test {
         int256 hi = a > b ? (a > c ? a : c) : (b > c ? b : c);
         assertGe(m, lo);
         assertLe(m, hi);
+    }
+}
+
+/// Posts a batch from inside another contract, as any relayer may.
+contract Relay {
+    function post(
+        AuguryHub hub,
+        bytes32 feedId,
+        uint64 round,
+        int256 price,
+        AuguryHub.SignedReport[] calldata reports,
+        bytes calldata signature
+    ) external {
+        hub.postBatch(feedId, round, price, reports, signature);
     }
 }

@@ -88,6 +88,10 @@ contract AuguryHub is IAugury {
     uint64 public immutable challengeWindow;
     /// @notice Seconds between an exit request and the withdrawal it allows.
     uint64 public immutable exitDelay;
+    /// @notice Seconds after an exit request or a slash during which the reporter still counts
+    /// as active. Without it a reporter in an honest batch could land `requestExit` (or a slash
+    /// of itself) in the same block as the batch and make it look fraudulent.
+    uint64 public immutable activityGrace;
     uint32 public immutable minReports;
     uint32 public immutable maxReports;
 
@@ -119,12 +123,15 @@ contract AuguryHub is IAugury {
     event StakeWithdrawn(address indexed reporter, address to, uint256 amount);
     event SequencerBonded(uint256 amount, uint256 total);
     event BondWithdrawn(address to, uint256 amount);
+    /// @dev Carries the batch's signed reports, so a watchtower can rebuild and challenge any
+    /// batch from logs alone, whether it was posted directly or relayed through a contract.
     event BatchPosted(
         bytes32 indexed feedId,
         uint64 indexed round,
         int256 price,
         bytes32 reportRoot,
-        uint32 reportCount
+        uint32 reportCount,
+        SignedReport[] reports
     );
     event BatchInvalidated(
         bytes32 indexed feedId, uint64 indexed round, FraudKind kind, address rewardTo
@@ -175,13 +182,16 @@ contract AuguryHub is IAugury {
         uint256 minSequencerBond_,
         uint64 challengeWindow_,
         uint64 exitDelay_,
+        uint64 activityGrace_,
         uint32 minReports_,
         uint32 maxReports_
     ) {
+        // A reporter's stake must stay slashable for equivocation until every batch it can
+        // still count in (up to the grace after its exit) is past its challenge window.
         if (
             sequencer_ == address(0) || minReporterStake_ == 0 || minSequencerBond_ == 0
-                || challengeWindow_ == 0 || exitDelay_ < challengeWindow_ || minReports_ == 0
-                || maxReports_ < minReports_
+                || challengeWindow_ == 0 || exitDelay_ < uint256(challengeWindow_) + activityGrace_
+                || minReports_ == 0 || maxReports_ < minReports_
         ) revert InvalidConfig();
         sequencer = sequencer_;
         mldsaAlgorithmId = mldsaAlgorithmId_;
@@ -189,6 +199,7 @@ contract AuguryHub is IAugury {
         minSequencerBond = minSequencerBond_;
         challengeWindow = challengeWindow_;
         exitDelay = exitDelay_;
+        activityGrace = activityGrace_;
         minReports = minReports_;
         maxReports = maxReports_;
     }
@@ -315,13 +326,15 @@ contract AuguryHub is IAugury {
     }
 
     /// @notice True if `reporter` counted as active for a batch posted at `at`: its stake had
-    /// reached the minimum by then, and it had neither asked to exit nor been slashed yet.
-    /// Judged from recorded times, not the current stake, so slashing or topping up a reporter
-    /// after a batch was posted cannot change whether that batch was honest.
+    /// reached the minimum by then, and any exit request or slash took effect only after it
+    /// (each takes effect `activityGrace` seconds after it happens). Judged from recorded
+    /// times, not the current stake, so nothing a reporter does after a batch is on its way can
+    /// change whether that batch was honest.
     function isActiveAt(address reporter, uint64 at) public view returns (bool) {
         Staker storage s = reporters[reporter];
         return s.activeSince != 0 && s.activeSince <= at
-            && (s.exitRequestedAt == 0 || s.exitRequestedAt > at) && (s.slashedAt == 0 || s.slashedAt > at);
+            && (s.exitRequestedAt == 0 || uint256(s.exitRequestedAt) + activityGrace > at)
+            && (s.slashedAt == 0 || uint256(s.slashedAt) + activityGrace > at);
     }
 
     // ---------------------------------------------------------------------------------------
@@ -364,9 +377,10 @@ contract AuguryHub is IAugury {
     /// @notice Post the median of a round, signed by the sequencer's ML-DSA-87 key. Anyone may
     /// relay it.
     /// @dev The batch's signed reports are part of the call, and the hub derives the report
-    /// root from them. Every batch's reports are therefore public in the transaction data, so
-    /// any watchtower can rebuild them for `challengeBatch`. Signatures are not checked here,
-    /// to keep posting cheap; a bad one is caught by the fraud proof.
+    /// root from them and emits them in `BatchPosted`. Every batch's reports are therefore
+    /// public in the logs, however the call reached the hub, so any watchtower can rebuild
+    /// them for `challengeBatch`. Signatures are not checked here, to keep posting cheap; a bad
+    /// one is caught by the fraud proof.
     function postBatch(
         bytes32 feedId,
         uint64 round,
@@ -396,7 +410,7 @@ contract AuguryHub is IAugury {
             status: Status.Posted
         });
         latestRound[feedId] = round;
-        emit BatchPosted(feedId, round, price, reportRoot, reportCount);
+        emit BatchPosted(feedId, round, price, reportRoot, reportCount, reports);
     }
 
     /// @notice One-step fraud proof. `reports` must be exactly the batch's reports, in order.
