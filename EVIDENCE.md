@@ -47,7 +47,7 @@ The sequencer funded the other seven accounts with hybrid-signed bank sends: `2F
 | Reporter 2 stake, 1 QOR (pins its key) | v3 hub | `0x8312d7080bc39634aa7f5d3c73a20ce4a6524e30e467ba0bd53ec94ca671b847` |
 | Watchtower sends 5 QOR to the sequencer for the v3 bond (native, hybrid-signed) | native | `F9E3F263031D27B6D5553DD6A32D709099CCBA94148DC2AE3FD0FD5C16321603` |
 
-| **AuguryHub v4 (current: also an overflow-free median)** | `0xa31ff9fa4435250040950267f185ad7bb9301500` (EVM) | `0xa515af31c3d609175f88d4b00555d68dfb7b26fea0f944fcd7c9fe8702694deb` |
+| **AuguryHub v4 (current: also an overflow-free median; predates the T20 and T21 fixes, see THREAT_MODEL.md)** | `0xa31ff9fa4435250040950267f185ad7bb9301500` (EVM) | `0xa515af31c3d609175f88d4b00555d68dfb7b26fea0f944fcd7c9fe8702694deb` |
 | Sequencer bond, 10 QOR | v4 hub | `0xb4c7a11111a8af9f2c4c2bb73756c1e5cdc938bc78abfd7100c63eab02664cba` |
 | Reporter 0, 1, 2 stakes, 1 QOR each (each pins its ML-DSA-87 key) | v4 hub | `0x37152f287d42a7d854411c6e72452438310059e75f180ae8cf02df8dc8a9f587`, `0x3af843be8ba9b6b56ea59fc9a6b6d415d69019c304b906a185f6bc1e0cce189a`, `0x7e67775c02e1c030f2316468843086d5ca131d12f079c0891a4ffdf27238ecb4` |
 | QOR moved to the sequencer for the v4 bond: 6 from the watchtower, 3 from committee member 0, 3 from committee member 2 (native, hybrid-signed) | native | `48677470545A7D2522A29DF570E9D42C277A9D97A90B577BCA56934C93C3FC0A`, `0E6EE7768BE403DF9D4B258C9EB6C822B4C075F187EC85F48F26A28E49FDEFA6`, `AD0C5D82771F6DBC1267347EA3CBBAB2E8D90829ED93BA4A4C2854D321F658CD` |
