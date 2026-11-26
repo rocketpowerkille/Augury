@@ -350,11 +350,19 @@ Done means built and tested; everything marked on chain has transaction hashes i
 - [x] Private feeds with QoreSeal epoch keys: `PrivateFeeds` contract, live on testnet with a subscriber rotated out
 - [ ] Dashboard and demo consumer
 - [x] Live fraud drill on testnet: a lying batch challenged by the watchtower and the sequencer's bond slashed
-- [ ] QoreScan in CI, demo video
+- [x] QoreScan in CI: every push inventories the contracts' cryptography (CycloneDX CBOM) and fails on anything quantum-vulnerable
+- [ ] Demo video
 
 ## Credits
 
-Built on the official QoreChain kits: `@qorechain/pqc` (ML-DSA-87) and `@qorechain/qoreseal` (ML-KEM-1024 envelopes) today, with the QoreChain SDK, the RDK, the QoreX integrations, the QoreChain MCP server and QoreScan to follow.
+Built on the official QoreChain kits, all Apache-2.0:
+
+- `@qorechain/pqc`: ML-DSA-87 signing and verification.
+- `@qorechain/qoreseal`: ML-KEM-1024 envelopes for sealed reports and share deliveries, and epoch keys for private feeds.
+- `@qorechain/sdk`: unified accounts, hybrid-signed native transactions, PQC key registration.
+- `@qorechain/evm`: EVM windows and the `pqcKeyStatus` reads.
+- `@qorechain/rdk`: the rollup inbox, settlement batches and receipt verification.
+- `@qorechain/qorescan`: the cryptographic inventory (CBOM) of the contracts, run in CI.
 
 Other open-source tools: [Foundry](https://github.com/foundry-rs/foundry) and [forge-std](https://github.com/foundry-rs/forge-std) for the contracts, [TypeScript](https://www.typescriptlang.org/) and [pnpm](https://pnpm.io/).
 
