@@ -40,12 +40,19 @@ The sequencer funded the other seven accounts with hybrid-signed bank sends: `2F
 | Reporter 1 stake, 1 QOR | v2 hub | `0xe089cb673f508d471640596d522ba5d5588be68ebf2a1489cb3cd54272075c75` |
 | Reporter 2 stake, 1 QOR | v2 hub | `0x4074b1c248f3005f21e14bbca961c00c336a08be5f96e2af871185efe6c7729c` |
 
-| **AuguryHub v3 (current: pinned reporter keys, post-time activity)** | `0x74a9cf2c448328d0bbde986228c4ca340ff04054` (EVM) | `0xf4ef42cb3a77cee3d9d7062f34609d0d52891224fdc06dbad8ad6359fa0825d2` |
+| AuguryHub v3 (pinned reporter keys, post-time activity; superseded, see below) | `0x74a9cf2c448328d0bbde986228c4ca340ff04054` (EVM) | `0xf4ef42cb3a77cee3d9d7062f34609d0d52891224fdc06dbad8ad6359fa0825d2` |
 | Sequencer bond, 10 QOR | v3 hub | `0x6a4f07b00769bc1ea9cbfa983948b5e44f588fd81887e8b81ac0418d9318c816` |
 | Reporter 0 stake, 1 QOR (pins its 2,592-byte ML-DSA-87 key) | v3 hub | `0x36362bc80ed4dcdaf210f94f8944185814148dc2a47100ce69076c48210601b9` |
 | Reporter 1 stake, 1 QOR (pins its key) | v3 hub | `0x9fd613ed9afa90c1eba788dcd52175cfb6f9444beced01c170d2ba6a74a60cc3` |
 | Reporter 2 stake, 1 QOR (pins its key) | v3 hub | `0x8312d7080bc39634aa7f5d3c73a20ce4a6524e30e467ba0bd53ec94ca671b847` |
 | Watchtower sends 5 QOR to the sequencer for the v3 bond (native, hybrid-signed) | native | `F9E3F263031D27B6D5553DD6A32D709099CCBA94148DC2AE3FD0FD5C16321603` |
+
+| **AuguryHub v4 (current: also an overflow-free median)** | `0xa31ff9fa4435250040950267f185ad7bb9301500` (EVM) | `0xa515af31c3d609175f88d4b00555d68dfb7b26fea0f944fcd7c9fe8702694deb` |
+| Sequencer bond, 10 QOR | v4 hub | `0xb4c7a11111a8af9f2c4c2bb73756c1e5cdc938bc78abfd7100c63eab02664cba` |
+| Reporter 0, 1, 2 stakes, 1 QOR each (each pins its ML-DSA-87 key) | v4 hub | `0x37152f287d42a7d854411c6e72452438310059e75f180ae8cf02df8dc8a9f587`, `0x3af843be8ba9b6b56ea59fc9a6b6d415d69019c304b906a185f6bc1e0cce189a`, `0x7e67775c02e1c030f2316468843086d5ca131d12f079c0891a4ffdf27238ecb4` |
+| QOR moved to the sequencer for the v4 bond: 6 from the watchtower, 3 from committee member 0, 3 from committee member 2 (native, hybrid-signed) | native | `48677470545A7D2522A29DF570E9D42C277A9D97A90B577BCA56934C93C3FC0A`, `0E6EE7768BE403DF9D4B258C9EB6C822B4C075F187EC85F48F26A28E49FDEFA6`, `AD0C5D82771F6DBC1267347EA3CBBAB2E8D90829ED93BA4A4C2854D321F658CD` |
+
+**Superseded v3 hub** `0x74a9cf2c448328d0bbde986228c4ca340ff04054`, recorded in `deployments/testnet-v3.json`. Its median computed `(a + b) / 2` for an even number of reports, which overflows for extreme values and makes `challengeBatch` revert (gap 16 in [THREAT_MODEL.md](THREAT_MODEL.md)). v4 computes the same value without overflowing.
 
 **Superseded v2 hub** `0x49bc74d9ad38f805f52984cc2f6d338429b4d3bd`, recorded in `deployments/testnet-v2.json`. A security review on 2026-11-26 found that a reporter included in an honest batch could get the sequencer slashed on it, by being slashed for equivocation or rotating its ML-DSA key during the challenge window (T14 and T15 in [THREAT_MODEL.md](THREAT_MODEL.md)). The v3 hub pins each reporter's key at stake time and judges activity by recorded times. `reporterKeys` on the v3 hub returns a 2,592-byte key for each of the three reporters.
 
@@ -57,7 +64,7 @@ The sequencer funded the other seven accounts with hybrid-signed bank sends: `2F
 |---|---|
 | ML-DSA-signed batches | Latest: v3 hub batches fBTC/USD `0xd95aadf4dbd5c2d3f3cdc6f9787852e3384fe9e3c38c3b742710a6dbb687ecac` and fETH/USD `0xcfd52da90eee8758cbbd08f24551d210ab336e52e172253d2d1265d33901b6d2`. First: round 1 batches on the v2 hub, each verified on chain with `pqcVerify` against the sequencer's registered ML-DSA-87 key: fBTC/USD `0xdf93fb41b93b855593a611c4d856959daff23d55738380aa342d1cc66ca4a222`, fETH/USD `0x4cb985dc84e969c7f246d33ba4c9c84a27bbb71bbe6517f9864a62221195605c` (see "Live rounds") |
 | Withdrawal | Pending: reporter and sequencer withdrawals after the exit delay; rollup withdrawals with settlement receipts |
-| Verified settlement receipt | Pending: anchoring rollup batches with the creator's ML-DSA-87 key |
+| Verified settlement receipt | Verified in the CLI (RDK chain mode), in Solidity on chain and through the browser verifier, on a real public receipt (see "Settlement receipts in Solidity and the browser"); anchoring Augury's own batches is pending a 1,000 QOR submitter bond |
 | Watchtower | Audited every live batch from its calldata against the rollup inbox ("checks out"), and in the fraud drill proved a lying batch wrong on chain: the batch was invalidated and the sequencer's bond slashed (see "Drills") |
 | ML-KEM data protection | Reports sealed with QoreSeal (ML-KEM-1024 + X25519) to each round's key; share deliveries sealed in ML-KEM-1024 mode to the committee's registered KEM keys (see "Live rounds"); a private feed whose epoch key is sealed to subscribers' registered ML-KEM-1024 keys and rotated when a subscriber is removed, who then cannot read the next value (see "Private feeds") |
 | Threat model | [THREAT_MODEL.md](THREAT_MODEL.md) |
@@ -87,6 +94,34 @@ The sequencer funded the other seven accounts with hybrid-signed bank sends: `2F
 | Sequencer posts the ML-DSA-87 signed median (block, gas) | `0xd95aadf4dbd5c2d3f3cdc6f9787852e3384fe9e3c38c3b742710a6dbb687ecac` (10,755,344; 547,673 gas) | `0xcfd52da90eee8758cbbd08f24551d210ab336e52e172253d2d1265d33901b6d2` (10,755,354; 547,493 gas) |
 | Settled price read with `getPrice` | 6,017,810,000,000 (USD 60,178.10), 3 reports | 168,825,000,000 (USD 1,688.25), 3 reports |
 | Watchtower audit | checks out | checks out |
+
+**v4 hub, two dealers per round, 2026-11-26 (UTC 00:08–00:11), hub `0xa31ff9fa4435250040950267f185ad7bb9301500`.** Every round now has two dealers, each knowing only its own seed, and every report is sealed to both round keys (section 7 of THREAT_MODEL.md). Round numbers continue the shared inbox: fBTC/USD round 8 and fETH/USD round 7.
+
+| Step | fBTC/USD round 8 | fETH/USD round 7 |
+|---|---|---|
+| Layer 0 dealer opens (round key, commitments, sealed deliveries; closes at 10,757,251) | `55D4F6507234DCB08642F56AD3390841FC425BD7259BE5FC34F0FBCF4CE50D8D` | `978BF055074C53FCA4EF81D6AFAED07E47D5AE59CB25B9E42C44A0A19B2C218C` |
+| Layer 1 dealer, a different member, opens with its own seed and the same close | `56F0DCB230560017B225D6BF07AEAA7F9D350F68D89502A8758A1E2F2A816022` | `419A5A32E91843C3A7ADA574E8EC4D09B602DD614D59F6703F57BB94C6467140` |
+| Reporters post a report sealed to both keys + its signature | `BB870B1D066A7BBC22AB1AFDC698248FD58C2B47C3CCE30DC21F2D7287C531E3`, `D988D7BD498B392BD34EB68AFC5A5AC56F0D45F40E1586966CCEE14C72F7A7DE`, `2D2C0AF08C7F359C1C8E5C3436D80302AAAA88E9EE26003E44D9F9B636E357CD` | `1422141F99348615B28AD825D5CEB13A5568AE67BBF8E935682FA6BF3459D2AC`, `72541CB84D56708952BFC1FC220AB40045E517D80491AA77BDCE7C43E5DD36F6`, `1821E0BAA8B0D7A9CD78486728A3E769F486EAA7AE7EE14B9A353EEB5D55814D` |
+| Layer 0 shares released after the close | `E8918E93DFBFB900317B4E5839152577AC76EF8B903A215EC0A72B3780FFA013`, `3F7627F65C9CCD52E414E7BD7B176C7047B2D5A2DE50384101696690D967E3B5`, `A79CF590055C058370B1C042FDF1430EFD5708B6C2BA42F4AFD29C1E0FEAFC35` | `8D3B95D05EEFCCD006D4B89C173086152702AE9C8A08204165FF8A67690CF6F1`, `9A2A70DAB518018D3150EC16B723E53D039FA2D58D5698DE860FFCEB4942378A`, `88141D8BAEC12398B788F436FC02CA63FE4F6ECC7F1715F1D0FDF8C4182FCAC4` |
+| Layer 1 shares released after the close | `E97278D3F2448E0EDD45E05894809FFFCD12A650D1130997451149AB69BA7140`, `A55A50172E9E3DDE12C826CDE59AE8CC0AB9717FA196D3B1986F9BAFFFDE3163`, `729823CC9FCB1B4EDB47E80D7F6A3E6FD3C9D65E30D55A25054F61748BE94B50` | `001FEA1A6B3CEB3654187801C773615ABE6E54266F95159FA71611A6BAC92D49`, `5B2C1947FD4FD2C7E873A7D7742B7A043C90884B6BE756A95831DC3092EAFB83`, `10B86770CA927ECA657D33B4CA819A4C0789B86C0D6D0BCF35CEA4898C006269` |
+| Sequencer opens both layers, verifies, posts the ML-DSA-87 signed median | `0x0f827567e593673f5f85a954c66c179d52e8474764d4e1f203184af1e0bcc37e` | `0xa71311d75abf7208785d4936920e401bc7ba8bc8005cf72b626f7bbfc3762ef8` |
+| Settled price read with `getPrice` | 6,041,410,000,000 (USD 60,414.10), 3 reports | 169,109,000,000 (USD 1,691.09), 3 reports |
+| Watchtower audit | checks out | checks out |
+
+The first batch attempts failed before broadcast: the sequencer had just used the same account to record a receipt, and the node reused that EVM window, which was scoped to the receipt contract instead of the hub. The fix checks a window's allowed targets before reusing it (`windowAdmits`, with a regression test); the batches above were posted after it.
+
+## Settlement receipts in Solidity and the browser
+
+`SettlementReceipts` rebuilds the RDK's canonical v2 anchor message byte for byte, resolves the rollup creator's key with `pqcKeyStatus` and checks the ML-DSA-87 signature with `pqcVerify`. Our own rollup has no anchored batch yet (the chain requires a 1,000 QOR submitter bond), so it was checked on a real receipt of the public rollup `cloister-dev-1`, batch 1, which the RDK verifies as valid against live chain state (`packages/chain/test/fixtures/receipt-cloister-dev-1-1.json`).
+
+| Step | Result | Transaction |
+|---|---|---|
+| Deployless `eth_call` of `verifyAnchor` against the real precompiles | valid; the same receipt with another state root or chain id is rejected | read-only |
+| Deploy SettlementReceipts `0xdbd2aba7128ceb68a392b4b218b7cfd742b44a6b` | | `0x0019f88a77fb4e401f18d9fd7f9f43b3511c8394355ea0aaf24111a93c585137` |
+| `record` the receipt: signature verified on chain, `ReceiptRecorded` emitted | success | `0x120d8cd5eaf0b272c6ace8f31f0d1eb12b6d8e27d6b0dda64cb08a948fb6021c` |
+| The browser verifier's own code (`web/verify-receipt/verify.js`) calls the deployed contract | valid | read-only |
+
+What this proves and does not: the creator's registered post-quantum key signed exactly these anchor fields. That QoreChain recorded the anchor is native chain state, checked by the RDK's chain-mode verification (`settle.ts`), not by the EVM or a browser.
 
 ## Private feeds
 

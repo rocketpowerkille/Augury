@@ -342,7 +342,8 @@ Done means built and tested; everything marked on chain has transaction hashes i
 - [x] CI: contracts and TypeScript on every push
 - [x] Chain adapters: verified inbox reads (checked live on testnet), inbox posts, AuguryHub calls through hub-scoped EVM windows, KEM registry, PQC key registration
 - [x] Node: committee, reporter, sequencer and watchtower roles; account, deploy and stake scripts (dry run by default)
-- [ ] Settlement receipts: anchor rollup batches with the creator's ML-DSA-87 key
+- [x] Settlement receipt verification in the CLI, in Solidity (`SettlementReceipts`) and in the browser (`web/verify-receipt`), checked on a real testnet receipt
+- [ ] Anchor Augury's own rollup batches (needs a 1,000 QOR submitter bond)
 - [x] Deployment to `qorechain-diana`: rollup `augury-oracle`, AuguryHub, 8 accounts with registered ML-DSA-87 keys (committee ML-KEM keys too), live rounds for fBTC/USD and fETH/USD
 - [ ] QOR/USD feed from a TWAP of QoreChain's AMM pools
 - [ ] Withdrawals with verified settlement receipts
