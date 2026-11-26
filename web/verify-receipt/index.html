@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Augury · verify a settlement receipt</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { max-width: 52rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+  textarea { width: 100%; height: 16rem; font-family: ui-monospace, monospace; font-size: 0.85rem; }
+  input { width: 100%; font-family: ui-monospace, monospace; }
+  label { display: block; margin-top: 1rem; font-weight: 600; }
+  button { margin-top: 1rem; padding: 0.5rem 1.2rem; font-size: 1rem; }
+  #result { margin-top: 1rem; padding: 0.8rem; border-radius: 6px; display: none; }
+  #result.ok { display: block; background: #d9f2df; color: #0b3d1a; }
+  #result.bad { display: block; background: #f7dcdc; color: #4d0d0d; }
+  small { color: GrayText; }
+</style>
+</head>
+<body>
+<h1>Verify a settlement receipt</h1>
+<p>
+  Paste a QoreChain RDK settlement receipt (version 2). This page asks Augury's
+  <code>SettlementReceipts</code> contract on the QoreChain EVM to rebuild the receipt's anchor
+  message and check its ML-DSA-87 signature against the rollup creator's key, which the
+  contract reads from the chain with <code>pqcKeyStatus</code> and checks with
+  <code>pqcVerify</code>. No key is taken from the receipt.
+</p>
+<p><small>
+  This proves the creator's registered post-quantum key signed exactly these anchor fields.
+  It does not prove QoreChain recorded the anchor: that is native chain state, which browsers
+  cannot query. <code>packages/node/scripts/settle.ts</code> checks it against a node.
+</small></p>
+
+<label for="receipt">Receipt JSON</label>
+<textarea id="receipt" spellcheck="false" placeholder='{"version": 2, "chainId": "qorechain-diana", ...}'></textarea>
+
+<label for="verifier">SettlementReceipts contract</label>
+<input id="verifier" value="">
+
+<label for="rpc">QoreChain EVM RPC</label>
+<input id="rpc" value="https://evm-testnet.qore.host">
+
+<button id="check">Verify</button>
+<div id="result"></div>
+
+<script type="module">
+  import { verifyInBrowser } from "./verify.js";
+  const $ = (id) => document.getElementById(id);
+  $("check").addEventListener("click", async () => {
+    const out = $("result");
+    out.className = "";
+    out.textContent = "";
+    try {
+      const receipt = JSON.parse($("receipt").value);
+      const ok = await verifyInBrowser(receipt, { rpc: $("rpc").value.trim(), verifier: $("verifier").value.trim() });
+      out.className = ok ? "ok" : "bad";
+      out.textContent = ok
+        ? `Valid: ${receipt.creator}'s registered ML-DSA-87 key signed batch ${receipt.batchIndex} of ${receipt.layerId} on ${receipt.chainId}.`
+        : "Not valid: the signature does not verify against the creator's registered key for these fields.";
+    } catch (err) {
+      out.className = "bad";
+      out.textContent = `Could not check: ${err.message}`;
+    }
+  });
+</script>
+</body>
+</html>
