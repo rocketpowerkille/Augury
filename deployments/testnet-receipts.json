@@ -1,0 +1,5 @@
+{
+  "network": "testnet",
+  "verifier": "0xdbd2aba7128ceb68a392b4b218b7cfd742b44a6b",
+  "deployTx": "0x0019f88a77fb4e401f18d9fd7f9f43b3511c8394355ea0aaf24111a93c585137"
+}
