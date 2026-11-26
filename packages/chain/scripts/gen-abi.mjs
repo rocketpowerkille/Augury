@@ -9,6 +9,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const contracts = [
   { name: "AuguryHub", file: "auguryHub.ts", exportName: "auguryHub" },
   { name: "PrivateFeeds", file: "privateFeeds.ts", exportName: "privateFeeds" },
+  { name: "SettlementReceipts", file: "settlementReceipts.ts", exportName: "settlementReceipts" },
 ];
 
 for (const c of contracts) {

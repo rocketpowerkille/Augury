@@ -17,7 +17,10 @@ import {
   type ReceiptVerification,
   type SettlementReceipt,
 } from "@qorechain/rdk";
-import type { UnifiedAccount } from "@qorechain/sdk";
+import { qorToEvm, type UnifiedAccount } from "@qorechain/sdk";
+import { decodeFunctionResult, encodeDeployData, encodeFunctionData, type PublicClient } from "viem";
+import type { Hex } from "@augury/shared";
+import { settlementReceiptsAbi, settlementReceiptsBytecode } from "./abi/settlementReceipts.ts";
 import type { NativeMessage } from "./native.ts";
 
 /**
@@ -85,4 +88,62 @@ export async function settlementReceipt(rollupId: string, batchIndex: number): P
 /** Re-verify a receipt against live chain state: every field is re-read from the node. */
 export async function verifyReceipt(receipt: SettlementReceipt): Promise<ReceiptVerification> {
   return verifySettlementReceipt(receipt, { client: createRdkClient({ network: "testnet" }) });
+}
+
+// ------------------------------------------------------------------------------------------
+// Verification in Solidity (contracts/src/SettlementReceipts.sol)
+// ------------------------------------------------------------------------------------------
+
+/** The anchor fields of a receipt, as SettlementReceipts takes them. Only v2 receipts carry them all. */
+export function anchorOfReceipt(r: SettlementReceipt): {
+  chainId: string;
+  layerId: string;
+  batchIndex: bigint;
+  stateRoot: Hex;
+  validatorSetHash: Hex;
+  transactionCount: bigint;
+  compressedStateProof: Hex;
+} {
+  if (r.version !== 2 || !r.chainId || r.transactionCount === undefined) {
+    throw new Error("only version-2 receipts can be verified in Solidity (v1 anchors carry no chain id)");
+  }
+  const hex = (s: string | undefined): Hex => `0x${(s ?? "").replace(/^0x/, "")}`;
+  return {
+    chainId: r.chainId,
+    layerId: r.layerId,
+    batchIndex: BigInt(r.batchIndex),
+    stateRoot: hex(r.stateRoot),
+    validatorSetHash: hex(r.validatorSetHash),
+    transactionCount: BigInt(r.transactionCount),
+    compressedStateProof: hex(r.compressedStateProof),
+  };
+}
+
+/** Arguments for `SettlementReceipts.verifyAnchor` and `record`: the anchor, the creator's EVM address, the signature. */
+export function receiptVerifierArgs(r: SettlementReceipt) {
+  return [anchorOfReceipt(r), qorToEvm(r.creator) as Hex, `0x${r.pqcSignature.replace(/^0x/, "")}` as Hex] as const;
+}
+
+/**
+ * Check a receipt's anchor signature with SettlementReceipts against live chain keys and the
+ * real pqcVerify precompile. With `verifier`, calls the deployed contract; without it, runs the
+ * contract's code in a deployless `eth_call`, so nothing is deployed or sent.
+ */
+export async function verifyReceiptOnEvm(client: PublicClient, r: SettlementReceipt, verifier?: Hex): Promise<boolean> {
+  const data = encodeFunctionData({ abi: settlementReceiptsAbi, functionName: "verifyAnchor", args: receiptVerifierArgs(r) });
+  const result = verifier
+    ? await client.call({ to: verifier, data })
+    : await client.call({ code: settlementReceiptsDeployless(), data });
+  if (!result.data) return false;
+  return decodeFunctionResult({ abi: settlementReceiptsAbi, functionName: "verifyAnchor", data: result.data });
+}
+
+/** Creation code of SettlementReceipts for ML-DSA-87 (algorithm id 1), for deployless calls. */
+function settlementReceiptsDeployless(): Hex {
+  return encodeDeployData({ abi: settlementReceiptsAbi, bytecode: settlementReceiptsBytecode, args: [1] });
+}
+
+/** Calldata for `SettlementReceipts.record`. */
+export function recordReceiptCalldata(r: SettlementReceipt): Hex {
+  return encodeFunctionData({ abi: settlementReceiptsAbi, functionName: "record", args: receiptVerifierArgs(r) });
 }

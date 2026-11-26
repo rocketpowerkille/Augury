@@ -9,3 +9,4 @@ export * from "./settlement.ts";
 export * from "./privatefeeds.ts";
 export { auguryHubAbi, auguryHubBytecode } from "./abi/auguryHub.ts";
 export { privateFeedsAbi, privateFeedsBytecode } from "./abi/privateFeeds.ts";
+export { settlementReceiptsAbi, settlementReceiptsBytecode } from "./abi/settlementReceipts.ts";
