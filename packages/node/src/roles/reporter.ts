@@ -5,7 +5,7 @@ import type { UnifiedAccount } from "@qorechain/sdk";
 import { planReporter } from "../plan.ts";
 import { join } from "node:path";
 import { ReportBook } from "../reportbook.ts";
-import { latestHeight, runLoop, type NodeContext } from "../runtime.ts";
+import { forEachSafely, latestHeight, runLoop, type NodeContext } from "../runtime.ts";
 
 export const REPORTABLE_FEEDS: readonly FeedName[] = ["fBTC/USD", "fETH/USD"];
 
@@ -43,7 +43,8 @@ export async function runReporter(ctx: NodeContext, opts: ReporterOptions): Prom
         marginBlocks: opts.marginBlocks,
       });
 
-      for (const { open, outer } of rounds) {
+      // Each feed on its own: one feed's sources being down must not stop the others.
+      await forEachSafely(rounds, async ({ open, outer }) => {
         const name = byId.get(open.feedId.toLowerCase())!;
         book.forgetBefore(open.feedId, open.round);
         let sources = "an earlier signing (resent)";
@@ -67,7 +68,7 @@ export async function runReporter(ctx: NodeContext, opts: ReporterOptions): Prom
         // Both posts in one transaction, so they sit next to each other in the inbox.
         const tx = await native.send(posts.map((p) => inboxPostMessage(native.address, ctx.deployment.rollupId, p)));
         ctx.log(`reported ${name} round ${open.round} from ${sources} (tx ${tx.hash})`);
-      }
+      }, ({ open }, err) => ctx.log(`round ${open.round} of ${byId.get(open.feedId.toLowerCase())}: ${err instanceof Error ? err.message : String(err)}`));
     },
     opts,
   );
