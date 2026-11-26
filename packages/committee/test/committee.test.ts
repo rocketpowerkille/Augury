@@ -9,7 +9,7 @@ import {
   type MemberShare,
 } from "@augury/shared";
 import { generateSealKeys, recipientOf } from "@qorechain/qoreseal";
-import { acceptDelivery, dealerFor, dealRound, releaseShare } from "../src/index.ts";
+import { acceptDelivery, acceptFirstValidDelivery, dealerFor, dealRound, releaseShare } from "../src/index.ts";
 
 const sealChainId = "qorechain-diana";
 const memberKeys = [generateSealKeys(), generateSealKeys(), generateSealKeys()] as const;
@@ -84,5 +84,20 @@ describe("committee", () => {
     assert.throws(() =>
       acceptDelivery({ sealChainId, member: x.member, keys: memberKeys[x.member], open: d.open, envelope }),
     );
+  });
+});
+
+describe("acceptFirstValidDelivery", () => {
+  /** Regression: a member stopped at the first delivery it found, even when it did not open. */
+  it("skips a delivery that does not open and accepts a later valid one", () => {
+    const keys = [generateSealKeys(), generateSealKeys(), generateSealKeys()] as const;
+    const members = [recipientOf(keys[0]), recipientOf(keys[1]), recipientOf(keys[2])] as const;
+    const deal = dealRound({ sealChainId: "qorechain-diana", feedId: FEEDS["fBTC/USD"], round: 4n, closeHeight: 50n, members });
+    const mine = deal.deliveries.find((d) => d.member === 2)!;
+    const garbage = Uint8Array.from(mine.envelope).fill(7, 100, 120);
+    const args = { sealChainId: "qorechain-diana", member: 2 as const, keys: keys[2], open: deal.open };
+    const share = acceptFirstValidDelivery(args, [garbage, mine.envelope]);
+    assert.equal(share.member, 2);
+    assert.throws(() => acceptFirstValidDelivery(args, [garbage]), /no valid delivery/);
   });
 });

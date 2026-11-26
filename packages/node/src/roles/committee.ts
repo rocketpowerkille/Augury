@@ -1,10 +1,10 @@
 import { evmAddress, fetchKemKeys, inboxPostMessage, NativeSender } from "@augury/chain";
-import { acceptDelivery, dealRound, releaseShare } from "@augury/committee";
+import { acceptFirstValidDelivery, dealRound, releaseShare } from "@augury/committee";
 import { bytesEqual, bytesToHex, hexToBytes, type Hex, type MemberIndex } from "@augury/shared";
 import { deriveSealKeys } from "@qorechain/qoreseal";
 import type { UnifiedAccount } from "@qorechain/sdk";
-import { planCommittee } from "../plan.ts";
-import { latestHeight, runLoop, type NodeContext } from "../runtime.ts";
+import { planCommittee, type CommitteeAction } from "../plan.ts";
+import { FailureCounter, forEachSafely, latestHeight, runLoop, type NodeContext } from "../runtime.ts";
 
 export interface CommitteeOptions {
   account: UnifiedAccount;
@@ -30,6 +30,10 @@ export async function runCommittee(ctx: NodeContext, opts: CommitteeOptions): Pr
   }
   const native = await NativeSender.connect(ctx.net, opts.account);
   const rollupId = ctx.deployment.rollupId;
+  // An action that keeps failing (say, no delivery for us opens) is given up after a few tries.
+  const failures = new FailureCounter(3);
+  const actionKey = (a: CommitteeAction) =>
+    a.kind === "deal" ? `deal:${a.feedId}:${a.round}:${a.layer}` : `release:${a.open.feedId}:${a.open.round}:${a.open.layer ?? 0}`;
   ctx.log(`member ${member} (${me}) ready`);
 
   await runLoop(
@@ -46,7 +50,9 @@ export async function runCommittee(ctx: NodeContext, opts: CommitteeOptions): Pr
         roundBlocks: opts.roundBlocks,
       });
 
-      for (const action of actions) {
+      // Each action on its own: one round that cannot be handled must not stall the others.
+      const pending = actions.filter((a) => !failures.exhausted(actionKey(a)));
+      await forEachSafely(pending, async (action) => {
         if (action.kind === "deal") {
           const deal = dealRound({
             sealChainId: ctx.net.chainId,
@@ -81,27 +87,25 @@ export async function runCommittee(ctx: NodeContext, opts: CommitteeOptions): Pr
           );
         } else {
           const { open } = action;
-          const delivery = ctx.inbox.entries.find(
-            (e) =>
-              e.post.kind === "delivery" &&
-              e.post.member === member &&
-              e.post.layer === open.layer &&
-              e.post.feedId === open.feedId &&
-              e.post.round === open.round &&
-              e.poster === ctx.cfg.committee[open.dealer],
+          // Every delivery the round's dealer posted for us, in inbox order; the first valid one counts.
+          const envelopes = ctx.inbox.entries.flatMap((e) =>
+            e.post.kind === "delivery" &&
+            e.post.member === member &&
+            e.post.layer === open.layer &&
+            e.post.feedId === open.feedId &&
+            e.post.round === open.round &&
+            e.poster === ctx.cfg.committee[open.dealer]
+              ? [hexToBytes(e.post.envelope)]
+              : [],
           );
-          if (!delivery || delivery.post.kind !== "delivery") continue;
-          const share = acceptDelivery({
-            sealChainId: ctx.net.chainId,
-            member,
-            keys: sealKeys,
-            open,
-            envelope: hexToBytes(delivery.post.envelope),
-          });
+          const share = acceptFirstValidDelivery({ sealChainId: ctx.net.chainId, member, keys: sealKeys, open }, envelopes);
           const tx = await native.send([inboxPostMessage(native.address, rollupId, releaseShare(open, share, height))]);
           ctx.log(`released layer ${open.layer ?? 0} share for round ${open.round} (tx ${tx.hash})`);
         }
-      }
+      }, (action, err) => {
+        const gaveUp = failures.fail(actionKey(action));
+        ctx.log(`${actionKey(action)} failed${gaveUp ? ", giving up" : ""}: ${err instanceof Error ? err.message : String(err)}`);
+      });
     },
     opts,
   );

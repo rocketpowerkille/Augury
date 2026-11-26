@@ -42,6 +42,46 @@ export class InboxCache {
   }
 }
 
+/**
+ * Run `fn` for each item in order. A failing item is reported to `onError` and the rest still
+ * run: one bad round (a delivery that does not open, a price source that is down) must not
+ * stop a role from handling every other round.
+ */
+export async function forEachSafely<T>(
+  items: readonly T[],
+  fn: (item: T) => Promise<void>,
+  onError: (item: T, err: unknown) => void,
+): Promise<void> {
+  for (const item of items) {
+    try {
+      await fn(item);
+    } catch (err) {
+      onError(item, err);
+    }
+  }
+}
+
+/** Counts failures per key, so a role can give up on an action that keeps failing. */
+export class FailureCounter {
+  readonly #counts = new Map<string, number>();
+  readonly limit: number;
+
+  constructor(limit: number) {
+    this.limit = limit;
+  }
+
+  /** Record a failure; true once `key` has failed `limit` times. */
+  fail(key: string): boolean {
+    const n = (this.#counts.get(key) ?? 0) + 1;
+    this.#counts.set(key, n);
+    return n >= this.limit;
+  }
+
+  exhausted(key: string): boolean {
+    return (this.#counts.get(key) ?? 0) >= this.limit;
+  }
+}
+
 /** Latest native block height, from `/cosmos/base/tendermint/v1beta1/blocks/latest`. */
 export async function latestHeight(rest: string): Promise<bigint> {
   const res = await fetch(`${rest}/cosmos/base/tendermint/v1beta1/blocks/latest`, {

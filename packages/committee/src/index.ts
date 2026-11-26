@@ -166,6 +166,23 @@ export function acceptDelivery(args: AcceptArgs): MemberShare {
   return share;
 }
 
+/**
+ * Accept the first of `envelopes` that opens to this member's valid share. A dealer (or a
+ * bug) may post a delivery that does not open or does not match the commitments; the member
+ * must not stop at it when a later delivery for the same round is valid. Throws if none is.
+ */
+export function acceptFirstValidDelivery(args: Omit<AcceptArgs, "envelope">, envelopes: readonly Uint8Array[]): MemberShare {
+  const errors: string[] = [];
+  for (const envelope of envelopes) {
+    try {
+      return acceptDelivery({ ...args, envelope });
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+  throw new Error(`no valid delivery among ${envelopes.length}: ${errors.join("; ") || "none posted"}`);
+}
+
 /** The share post to publish once the round has closed. Refuses to release early. */
 export function releaseShare(open: RoundOpen, share: MemberShare, currentHeight: bigint): SharePost {
   if (currentHeight <= open.closeHeight) {
