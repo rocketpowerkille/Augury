@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { FEEDS, type Hex, type InboxEntry, type InboxPost, type RoundConfig, type RoundOpen } from "@augury/shared";
-import { latestOpen, outerOpenOf, planCommittee, planReporter, planSequencer, roundKey } from "../src/plan.ts";
+import {
+  latestOpen,
+  outerOpenOf,
+  planCommittee,
+  planReporter,
+  planSequencer,
+  roundKey,
+  SHARE_TIMEOUT_BLOCKS,
+  sharesOverdue,
+} from "../src/plan.ts";
 
 const addr = (n: number) => `0x${n.toString(16).padStart(40, "0")}` as Hex;
 const committee = [addr(0xc0), addr(0xc1), addr(0xc2)] as const;
@@ -187,5 +196,14 @@ describe("planSequencer", () => {
       skipped: new Set([roundKey(BTC, 2n)]),
     });
     assert.deepEqual(rounds.map((r) => r.round), [3n]);
+  });
+});
+
+describe("sharesOverdue", () => {
+  /** Regression: a round whose shares never came blocked every later round of its feed forever. */
+  it("gives up on a round's shares only after the timeout past its close", () => {
+    assert.equal(sharesOverdue(100n, 100n + SHARE_TIMEOUT_BLOCKS), false);
+    assert.equal(sharesOverdue(100n, 101n + SHARE_TIMEOUT_BLOCKS), true);
+    assert.equal(sharesOverdue(100n, 150n, 10n), true);
   });
 });

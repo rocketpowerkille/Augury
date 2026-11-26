@@ -9,7 +9,7 @@ import {
 import { buildBatch } from "@augury/sequencer";
 import type { Hex } from "@augury/shared";
 import type { UnifiedAccount } from "@qorechain/sdk";
-import { planSequencer, roundKey } from "../plan.ts";
+import { planSequencer, roundKey, sharesOverdue } from "../plan.ts";
 import { latestHeight, runLoop, type NodeContext } from "../runtime.ts";
 
 export interface SequencerOptions {
@@ -46,18 +46,24 @@ export async function runSequencer(ctx: NodeContext, opts: SequencerOptions): Pr
               .map((e) => e.poster),
           ),
         ];
-        const view = await loadChainView(ctx.evm, ctx.deployment.hub, reporters);
-        const { outcome, batch } = buildBatch(ctx.cfg, view, ctx.inbox.entries, feedId, round, opts.account.pqc.secretKey);
+        try {
+          const view = await loadChainView(ctx.evm, ctx.deployment.hub, reporters);
+          const { outcome, batch } = buildBatch(ctx.cfg, view, ctx.inbox.entries, feedId, round, opts.account.pqc.secretKey);
 
-        if (batch) {
-          const tx = await hub.send(postBatchCalldata(batch));
-          ctx.log(`posted round ${round}: ${batch.header.reportCount} reports, median ${batch.header.price} (tx ${tx.hash}, ${tx.status})`);
-        } else if (outcome.status === "awaiting-shares") {
-          // Rounds must reach the hub in order: wait for this one before any later round.
+          if (batch) {
+            const tx = await hub.send(postBatchCalldata(batch));
+            ctx.log(`posted round ${round}: ${batch.header.reportCount} reports, median ${batch.header.price} (tx ${tx.hash}, ${tx.status})`);
+          } else if (outcome.status === "awaiting-shares" && !sharesOverdue(outcome.open.closeHeight, height)) {
+            // Rounds must reach the hub in order: wait for this one before any later round.
+            blockedFeeds.add(feedId.toLowerCase());
+          } else {
+            skipped.add(roundKey(feedId, round));
+            ctx.log(`skipping round ${round}: ${outcome.status}${outcome.status === "awaiting-shares" ? " (shares overdue)" : ""}`);
+          }
+        } catch (err) {
+          // Keep the feed's rounds in order: retry this one next tick before any later round.
           blockedFeeds.add(feedId.toLowerCase());
-        } else {
-          skipped.add(roundKey(feedId, round));
-          ctx.log(`skipping round ${round}: ${outcome.status}`);
+          ctx.log(`round ${round}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
     },

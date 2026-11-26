@@ -169,6 +169,19 @@ export function planReporter(args: {
 // Sequencer
 // ------------------------------------------------------------------------------------------
 
+/**
+ * Blocks after a round's close that the sequencer waits for its shares (about ten minutes at
+ * QoreChain's one-second blocks). Rounds reach the hub in order, so until then later rounds of
+ * the feed wait too; after it the round is given up, so a dealer whose deliveries never open,
+ * or committee members who stay offline, cannot stall the feed forever.
+ */
+export const SHARE_TIMEOUT_BLOCKS = 600n;
+
+/** Whether the sequencer should stop waiting for the shares of a round that closed at `closeHeight`. */
+export function sharesOverdue(closeHeight: bigint, height: bigint, timeoutBlocks = SHARE_TIMEOUT_BLOCKS): boolean {
+  return height > closeHeight + timeoutBlocks;
+}
+
 /** Closed rounds newer than what the hub has settled, oldest first. */
 export function planSequencer(args: {
   cfg: RoundConfig;
