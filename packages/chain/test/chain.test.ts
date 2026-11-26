@@ -13,6 +13,7 @@ import {
   gasFor,
   inboxPostMessage,
   isActiveNow,
+  windowAdmits,
   loadChainView,
   parseAccountSequence,
   parseDeployment,
@@ -316,5 +317,27 @@ describe("PrivateFeeds calldata", () => {
     const [publisher, ...rest] = args;
     assert.equal(publisher.toLowerCase(), "0x00000000000000000000000000000000000000aa"); // viem returns it checksummed
     assert.deepEqual(rest, [FEED, 7n, 3n, publication.commitment, publication.blobHash, "0x090807"]);
+  });
+});
+
+describe("EVM window reuse", () => {
+  const hub = "0x00000000000000000000000000000000000000bb" as const;
+  const live = { found: true, live: true, remainingTxs: 3n, remainingValue: 1_000n, allowedTargets: [hub as string] };
+
+  it("reuses a live window that lists the target", () => {
+    assert.equal(windowAdmits(live, hub, 500n), true);
+    assert.equal(windowAdmits({ ...live, allowedTargets: [hub.toUpperCase().replace("0X", "0x")] }, hub, 500n), true);
+    assert.equal(windowAdmits({ ...live, allowedTargets: [] }, hub, 500n), true); // unscoped
+  });
+
+  /** Regression: a window scoped to another contract was reused and the hub call was rejected. */
+  it("does not reuse a window scoped to another contract", () => {
+    assert.equal(windowAdmits({ ...live, allowedTargets: ["0x00000000000000000000000000000000000000cc"] }, hub, 500n), false);
+  });
+
+  it("does not reuse an expired, exhausted or underfunded window", () => {
+    assert.equal(windowAdmits({ ...live, live: false }, hub, 500n), false);
+    assert.equal(windowAdmits({ ...live, remainingTxs: 0n }, hub, 500n), false);
+    assert.equal(windowAdmits({ ...live, remainingValue: 499n }, hub, 500n), false);
   });
 });

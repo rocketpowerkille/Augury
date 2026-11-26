@@ -305,6 +305,20 @@ export async function deployThroughWindow(opts: {
 // Writes through a scoped EVM window
 // ------------------------------------------------------------------------------------------
 
+/**
+ * Whether an open EVM window admits one more transaction to `target` costing `costUqor`. A
+ * window narrowed to other contracts does not: an account that called another contract (say
+ * PrivateFeeds) must open a new window before calling the hub.
+ */
+export function windowAdmits(
+  w: { found: boolean; live: boolean; remainingTxs: bigint; remainingValue: bigint; allowedTargets: readonly string[] },
+  target: Hex,
+  costUqor: bigint,
+): boolean {
+  if (!w.found || !w.live || w.remainingTxs < 1n || w.remainingValue < costUqor) return false;
+  return w.allowedTargets.length === 0 || w.allowedTargets.some((t) => t.toLowerCase() === target.toLowerCase());
+}
+
 /** How a window is sized when one has to be opened. */
 export interface WindowPolicy {
   blocks: bigint;
@@ -351,7 +365,7 @@ export class HubSender {
   /** Open a hub-scoped window unless a live one can still pay for `costUqor`. */
   private async ensureWindow(costUqor: bigint): Promise<void> {
     const w = await evmWindowStatus({ rest: this.net.rest, address: this.native.address });
-    if (w.found && w.live && w.remainingTxs >= 1n && w.remainingValue >= costUqor) return;
+    if (windowAdmits(w, this.hub, costUqor)) return;
     const fees = await this.client.estimateFeesPerGas();
     const perTx = evmWindowCost({ gas: this.policy.gasPerTx, maxFeePerGas: fees.maxFeePerGas });
     const msg = openEvmWindowMessage({
