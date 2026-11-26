@@ -17,7 +17,6 @@ import { bytesEqual, bytesToHex, concatBytes, hexToBytes, sha256, type Hex } fro
  */
 
 export const SEED_LENGTH = 32;
-export const COMMITTEE_SIZE = 3;
 
 export type MemberIndex = 0 | 1 | 2;
 export type PartIndex = 0 | 1 | 2;

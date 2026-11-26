@@ -25,7 +25,7 @@ if (existsSync(file)) {
 
 const mnemonic = generateMnemonic(256);
 const account = await deriveUnifiedAccount(mnemonic);
-mkdirSync(dir, { recursive: true });
+mkdirSync(dir, { recursive: true, mode: 0o700 });
 writeFileSync(file, `${JSON.stringify({ mnemonic }, null, 2)}\n`, { mode: 0o600 });
 
 console.log(`saved ${file} (keep it secret; it is git-ignored)`);

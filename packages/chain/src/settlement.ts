@@ -11,7 +11,6 @@ import {
   QledgerLedger,
   RestClient,
   submitBatchMsg,
-  unbondRollupSubmitterMsg,
   verifySettlementReceipt,
   type QledgerBatchPlan,
   type ReceiptVerification,
@@ -73,11 +72,6 @@ export function anchoredBatchMessage(plan: QledgerBatchPlan, creator: UnifiedAcc
 /** Add `amountUqor` to `submitter`'s bond (the chain requires at least 1,000 QOR to submit). */
 export function bondSubmitterMessage(submitter: string, rollupId: string, amountUqor: bigint): NativeMessage {
   return bondRollupSubmitterMsg({ submitter, rollupId, amount: amountUqor.toString() });
-}
-
-/** Withdraw `submitter`'s whole bond, a full challenge window after its last batch. */
-export function unbondSubmitterMessage(submitter: string, rollupId: string): NativeMessage {
-  return unbondRollupSubmitterMsg({ submitter, rollupId });
 }
 
 /** The settlement receipt of an anchored batch, built from chain state. */

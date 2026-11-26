@@ -1,4 +1,5 @@
 import { bytesToHex, concatBytes, hexToBytes, type Hex } from "./bytes.ts";
+import { ML_DSA_87_SIGNATURE_LENGTH as ML_DSA_87_SIGNATURE } from "./crypto.ts";
 import type { MemberIndex, MemberShare, PartIndex } from "./shares.ts";
 
 /**
@@ -32,7 +33,6 @@ const V3 = 0x03;
 const KIND = { open: 1, report: 2, signature: 3, share: 4, delivery: 5, "private-value": 6, "epoch-key": 7 } as const;
 const ML_KEM_1024_PUBLIC_KEY = 1568;
 const X25519_PUBLIC_KEY = 32;
-const ML_DSA_87_SIGNATURE = 4627;
 
 export interface RoundOpen {
   kind: "open";
