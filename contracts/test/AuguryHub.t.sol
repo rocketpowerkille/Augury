@@ -610,6 +610,30 @@ contract AuguryHubTest is Test {
         assertEq(hub.median(neg), -1);
     }
 
+    /// Regression: the mean of two large middle values overflowed, so `challengeBatch` reverted
+    /// and a batch with such reports could not be proven wrong.
+    function test_MedianDoesNotOverflow() public view {
+        int256 max = type(int256).max;
+        int256 min = type(int256).min;
+        int256[] memory two = new int256[](2);
+        (two[0], two[1]) = (max, max);
+        assertEq(hub.median(two), max);
+        (two[0], two[1]) = (max, max - 1);
+        assertEq(hub.median(two), max - 1);
+        (two[0], two[1]) = (min, min);
+        assertEq(hub.median(two), min);
+        (two[0], two[1]) = (min, min + 1);
+        assertEq(hub.median(two), min + 1);
+        (two[0], two[1]) = (min, max);
+        assertEq(hub.median(two), 0);
+    }
+
+    function testFuzz_MeanMatchesTruncatedDivision(int128 a, int128 b) public view {
+        int256[] memory two = new int256[](2);
+        (two[0], two[1]) = (int256(a), int256(b));
+        assertEq(hub.median(two), (int256(a) + int256(b)) / 2);
+    }
+
     function testFuzz_MedianIsBetweenMinAndMax(int128 a, int128 b, int128 c) public view {
         int256 m = hub.median(_prices3(a, b, c));
         int256 lo = a < b ? (a < c ? a : c) : (b < c ? b : c);

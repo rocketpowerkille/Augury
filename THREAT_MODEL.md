@@ -75,7 +75,7 @@
 13. **A compromised reporter key stays pinned until the reporter exits.** Rotating the key on chain does not change the key AuguryHub checks reports against (that is what stops T14). A reporter whose key leaks must sign `requestExit` with its current key; until then, whoever holds the old key can sign reports or equivocation evidence in its name, and the stake can be slashed.
 14. **Resolved: the reporter's signed-report book is kept on disk.** It is saved before each post is sent (`state/`, git-ignored, owner-only file mode), so a node that restarts mid-round resends its report instead of signing again. The file holds sealed salts until each round closes; protect it like a key file.
 15. **Resolved: the watchtower judges activity at the batch's post time.** It reads `isActiveAt(reporter, postedAt)` from the hub, the rule the fraud proof applies, so it no longer sends challenges the hub rejects.
-16. **The on-chain median can overflow.** For an even count, the median is the mean of the two middle values, and their sum can exceed `int256`. Then `challengeBatch` reverts and the batch cannot be challenged. This needs at least half of a round's reporters to sign absurd prices, which is already outside assumption 7.
+16. **Resolved in code: the on-chain median no longer overflows.** For an even count the mean of the two middle values is computed without forming their sum, so `challengeBatch` works for any `int256` prices; a regression test and a fuzz test against plain division cover it. Live once the hub is redeployed.
 
 ## 6. Security review log
 

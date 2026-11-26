@@ -492,7 +492,15 @@ contract AuguryHub is IAugury {
             values[j] = v;
         }
         if (n % 2 == 1) return values[n / 2];
-        return (values[n / 2 - 1] + values[n / 2]) / 2;
+        return _mean(values[n / 2 - 1], values[n / 2]);
+    }
+
+    /// @dev (a + b) / 2 truncated toward zero, without overflowing for any int256 values. With
+    /// opposite signs the sum cannot overflow; with equal signs the halves and their remainders
+    /// add up to the same result. Equals the TypeScript median, which uses unbounded integers.
+    function _mean(int256 a, int256 b) internal pure returns (int256) {
+        if ((a < 0) != (b < 0)) return (a + b) / 2;
+        return a / 2 + b / 2 + (a % 2 + b % 2) / 2;
     }
 
     // ---------------------------------------------------------------------------------------
