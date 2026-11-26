@@ -85,3 +85,13 @@ export function auditBatch(
 
   return findings;
 }
+
+/**
+ * Whether an audit saw the whole round. If the round's shares (or a two-dealer round's second
+ * open) are not in the inbox the watchtower has read yet, the audit could not check for
+ * omitted or unexpected reports and must run again later: the batch may simply have been
+ * posted just after the watchtower last read the inbox.
+ */
+export function auditComplete(findings: readonly Finding[]): boolean {
+  return !findings.some((f) => f.kind === "no-canonical-batch" && (f.status === "awaiting-shares" || f.status === "no-open"));
+}

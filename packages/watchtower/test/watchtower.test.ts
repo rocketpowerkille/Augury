@@ -12,7 +12,7 @@ import {
   type RoundConfig,
   type SignedReport,
 } from "@augury/shared";
-import { auditBatch, provableFraud, type PostedBatch } from "../src/index.ts";
+import { auditBatch, auditComplete, provableFraud, type PostedBatch } from "../src/index.ts";
 
 const addr = (n: number) => `0x${n.toString(16).padStart(40, "0")}` as Hex;
 const cfg: RoundConfig = {
@@ -89,5 +89,15 @@ describe("auditBatch", () => {
   it("flags a batch posted for a round the inbox never opened", () => {
     const findings = auditBatch(cfg, view(), [], batch([signed(0), signed(1), signed(2)]));
     assert.deepEqual(findings, [{ kind: "no-canonical-batch", status: "no-open" }]);
+  });
+});
+
+describe("auditComplete", () => {
+  /** Regression: a batch audited before its shares were read was never checked for omissions. */
+  it("asks for another audit while the round's shares or opens are missing", () => {
+    assert.equal(auditComplete([{ kind: "no-canonical-batch", status: "awaiting-shares" }]), false);
+    assert.equal(auditComplete([{ kind: "no-canonical-batch", status: "no-open" }]), false);
+    assert.equal(auditComplete([{ kind: "no-canonical-batch", status: "too-few-reports" }]), true);
+    assert.equal(auditComplete([]), true);
   });
 });
