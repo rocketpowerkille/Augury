@@ -36,6 +36,30 @@ jobs:
         working-directory: contracts
         run: forge test -vv
 
+  qorescan:
+    name: QoreScan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # The launcher downloads the qorescan release binary and runs it only if its SHA-256
+      # matches the digests shipped in this exact package version.
+      - name: Inventory the contracts' cryptography (CycloneDX CBOM)
+        run: npx --yes @qorechain/qorescan@0.1.0 solidity contracts/src --out cbom.json
+
+      - name: No quantum-vulnerable cryptography in contracts
+        run: node scripts/check-cbom.mjs cbom.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cbom
+          path: cbom.json
+
   typescript:
     name: TypeScript
     runs-on: ubuntu-latest
